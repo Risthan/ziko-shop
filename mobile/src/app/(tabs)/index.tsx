@@ -16,7 +16,7 @@ import { colors, motion, radius, spacing } from "@/theme";
 import { AppText } from "@/ui/AppText";
 import { Button } from "@/ui/Button";
 import { SectionTitle } from "@/ui/Card";
-import { IconButton } from "@/ui/IconButton";
+import { CartButton } from "@/ui/CartButton";
 import { Logo } from "@/ui/Logo";
 import { ProductCard, ProductCardSkeleton } from "@/ui/ProductCard";
 import { ProductImage } from "@/ui/ProductImage";
@@ -73,7 +73,7 @@ export default function HomeScreen() {
     <View style={styles.header}>
       <View style={styles.topRow}>
         <Logo width={128} />
-        <IconButton icon="bag-handle-outline" label="Mes commandes" onPress={() => router.navigate("/commandes")} />
+        <CartButton />
       </View>
       <SearchField value={search} onChange={setSearch} placeholder="Rechercher un pull…" />
       <PendingPaymentBanner />

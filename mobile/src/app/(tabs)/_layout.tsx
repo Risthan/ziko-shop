@@ -2,7 +2,7 @@ import { Tabs } from "expo-router/tabs";
 import { colors } from "@/theme";
 import { TabBar } from "@/ui/TabBar";
 
-/** Les trois onglets principaux, avec la même barre flottante. */
+/** Les quatre onglets principaux, avec la même barre flottante. */
 export default function TabsLayout() {
   return (
     <Tabs
@@ -11,6 +11,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: "Accueil" }} />
       <Tabs.Screen name="essayage" options={{ title: "Essayage" }} />
+      <Tabs.Screen name="panier" options={{ title: "Panier" }} />
       <Tabs.Screen name="commandes" options={{ title: "Commandes" }} />
     </Tabs>
   );

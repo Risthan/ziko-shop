@@ -5,11 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState, Linking, Platform, ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { API_URL } from "@/config";
+import { cart } from "@/lib/cart/useCart";
 import { groupByModel, modelCopy } from "@/lib/catalog";
 import { formatCdf, normalize, splitProductName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { useProducts, useTryOnConfig } from "@/lib/queries";
 import { colors, motion, radius, spacing } from "@/theme";
+import { AddedToCart } from "@/ui/AddedToCart";
 import { AppText } from "@/ui/AppText";
 import { StockBadge } from "@/ui/Badges";
 import { Button } from "@/ui/Button";
@@ -38,6 +40,7 @@ export default function TryOnScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [addedId, setAddedId] = useState<string | null>(null);
   const [active, setActive] = useState(true);
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<{ value: TryOnStatus; message?: string }>({ value: "loading" });
@@ -225,12 +228,26 @@ export default function TryOnScreen() {
         </Card>
 
         {/* L'achat n'est JAMAIS bloqué par le service d'essayage. */}
-        <Button
-          title={selected.stock > 0 ? `Commander ce pull · ${formatCdf(selected.priceCdf)}` : "Produit épuisé"}
-          icon="bag-handle-outline"
-          disabled={selected.stock <= 0}
-          onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: selected.id } })}
-        />
+        <View style={styles.actions}>
+          <Button
+            title={selected.stock > 0 ? `Ajouter au panier · ${formatCdf(selected.priceCdf)}` : "Produit épuisé"}
+            icon="cart-outline"
+            disabled={selected.stock <= 0}
+            onPress={() => {
+              cart.add(selected.id, 1, selected.stock);
+              haptics.success();
+              setAddedId(selected.id);
+            }}
+          />
+          {addedId === selected.id ? <AddedToCart name={`${model} ${color ?? ""}`.trim()} /> : null}
+          <Button
+            title="Commander ce pull"
+            variant="secondary"
+            icon="bag-handle-outline"
+            disabled={selected.stock <= 0}
+            onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: selected.id } })}
+          />
+        </View>
       </ScrollView>
 
       <Sheet
@@ -239,7 +256,7 @@ export default function TryOnScreen() {
         icon="scan-outline"
         tone="accent"
         title="Comment ça marche ?"
-        message="L'essayage démarre tout seul dans le cadre. Placez-vous face à la caméra, le haut du corps bien visible, et reculez d'un pas si besoin. Touchez un autre modèle ou une autre couleur : le pull change aussitôt. Il vous plaît ? Commandez-le juste en dessous."
+        message="L'essayage démarre tout seul dans le cadre. Placez-vous face à la caméra, le haut du corps bien visible, et reculez d'un pas si besoin. Touchez un autre modèle ou une autre couleur : le pull change aussitôt. Il vous plaît ? Ajoutez-le au panier, essayez-en d'autres, puis commandez le tout en une fois."
       >
         <Button title="J'ai compris" onPress={() => setHelpOpen(false)} />
       </Sheet>
@@ -338,4 +355,5 @@ const styles = StyleSheet.create({
   infoCard: { gap: spacing.md },
   infoRow: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start" },
   colorBlock: { gap: spacing.sm },
+  actions: { gap: spacing.md },
 });

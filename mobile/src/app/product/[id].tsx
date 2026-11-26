@@ -5,12 +5,16 @@ import { useState } from "react";
 import { ScrollView, Share, StyleSheet, View } from "react-native";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { ApiError } from "@/api/client";
+import { cart } from "@/lib/cart/useCart";
 import { modelCopy, variantsOf } from "@/lib/catalog";
 import { formatCdf, splitProductName } from "@/lib/format";
+import { haptics } from "@/lib/haptics";
 import { useProduct, useProducts } from "@/lib/queries";
 import { colors, fonts, motion, radius, spacing } from "@/theme";
 import { AppText } from "@/ui/AppText";
 import { StockBadge } from "@/ui/Badges";
+import { AddedToCart } from "@/ui/AddedToCart";
+import { CartButton } from "@/ui/CartButton";
 import { Button, type IconName } from "@/ui/Button";
 import { ColorSwatches } from "@/ui/ColorSwatches";
 import { Header } from "@/ui/Header";
@@ -25,6 +29,7 @@ export default function ProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const product = useProduct(id);
   const products = useProducts();
+  const [addedId, setAddedId] = useState<string | null>(null);
 
   if (!product.data) {
     return (
@@ -58,7 +63,15 @@ export default function ProductScreen() {
 
   return (
     <Screen edges={["top", "left", "right", "bottom"]}>
-      <Header back right={<IconButton icon="share-outline" label="Partager ce produit" onPress={share} />} />
+      <Header
+        back
+        right={
+          <View style={styles.headerActions}>
+            <IconButton icon="share-outline" label="Partager ce produit" onPress={share} />
+            <CartButton />
+          </View>
+        }
+      />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Galerie : vignettes des couleurs + grande photo */}
         <View style={styles.gallery}>
@@ -123,19 +136,37 @@ export default function ProductScreen() {
         ) : null}
 
         <View style={styles.actions}>
+          {/* « Commander » reste l'action principale, comme le demande le sujet. */}
           <Button
             title={soldOut ? "Produit épuisé" : "Commander"}
             icon={soldOut ? "close-circle-outline" : "bag-handle-outline"}
             disabled={soldOut}
             onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: current.id } })}
           />
-          <Button
-            title="Essayer en direct"
-            variant="secondary"
-            icon="scan-outline"
-            accessibilityHint="Ouvre l'essayage virtuel avec la caméra"
-            onPress={() => router.navigate({ pathname: "/essayage", params: { produit: current.id } })}
-          />
+          <View style={styles.actionRow}>
+            <Button
+              title="Au panier"
+              variant="secondary"
+              icon="cart-outline"
+              disabled={soldOut}
+              accessibilityHint="Ajoute ce pull au panier pour commander plusieurs articles"
+              style={styles.half}
+              onPress={() => {
+                cart.add(current.id, 1, current.stock);
+                haptics.success();
+                setAddedId(current.id);
+              }}
+            />
+            <Button
+              title="Essayer"
+              variant="secondary"
+              icon="scan-outline"
+              accessibilityHint="Ouvre l'essayage en direct avec la caméra"
+              style={styles.half}
+              onPress={() => router.navigate({ pathname: "/essayage", params: { produit: current.id } })}
+            />
+          </View>
+          {addedId === current.id ? <AddedToCart name={model} /> : null}
         </View>
 
         <View style={styles.accordions}>
@@ -210,6 +241,9 @@ const styles = StyleSheet.create({
   price: { marginTop: spacing.xs },
   section: { gap: spacing.md },
   actions: { gap: spacing.md },
+  actionRow: { flexDirection: "row", gap: spacing.md },
+  headerActions: { flexDirection: "row", gap: spacing.sm },
+  half: { flex: 1, paddingHorizontal: spacing.sm },
   accordions: { gap: spacing.sm },
   accordion: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   accordionHead: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, minHeight: 56 },
