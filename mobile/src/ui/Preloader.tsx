@@ -48,7 +48,11 @@ export function Preloader({ onDone }: { onDone: () => void }) {
 
 const styles = StyleSheet.create({
   root: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: colors.background,
     alignItems: "center",
     justifyContent: "center",

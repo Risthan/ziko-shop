@@ -15,22 +15,20 @@ const ICONS: Record<string, { active: IconName; idle: IconName }> = {
 };
 
 /** Barre d'onglets flottante, identique sur tous les écrans principaux. */
-export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+export function TabBar({ state, descriptors, navigateToTab }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
       <View style={styles.bar}>
         {state.routes.map((route, index) => {
           const focused = state.index === index;
-          const { options } = descriptors[route.key]!;
-          const label = typeof options.title === "string" ? options.title : route.name;
+          const options = descriptors[route.key]?.options;
+          const label = typeof options?.title === "string" ? options.title : route.name;
           const icon = ICONS[route.name] ?? ICONS.index!;
           const onPress = () => {
-            const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
-            if (!focused && !event.defaultPrevented) {
-              haptics.select();
-              navigation.navigate(route.name, route.params);
-            }
+            if (focused) return;
+            haptics.select();
+            navigateToTab(route.key);
           };
           return (
             <PressableScale
