@@ -3,14 +3,21 @@ import type { OrderStatus } from "@/api/types";
 import { colors, fonts, radius } from "@/theme";
 import { AppText } from "./AppText";
 
-const LABELS: Record<OrderStatus, string> = { en_attente: "En attente", payee: "Payée" };
+/** "unknown" : le réseau a coupé, l'app ne sait pas encore ce que le serveur a fait. */
+type BadgeStatus = OrderStatus | "unknown";
 
-export function StatusBadge({ status }: { status: OrderStatus }) {
-  const paid = status === "payee";
+const STYLES: Record<BadgeStatus, { label: string; bg: string; fg: string }> = {
+  en_attente: { label: "En attente", bg: colors.warningSoft, fg: colors.warning },
+  payee: { label: "Payée", bg: colors.successSoft, fg: colors.success },
+  unknown: { label: "À confirmer", bg: colors.border, fg: colors.textMuted },
+};
+
+export function StatusBadge({ status }: { status: BadgeStatus }) {
+  const style = STYLES[status];
   return (
-    <View style={[styles.badge, { backgroundColor: paid ? colors.successSoft : colors.warningSoft }]}>
-      <View style={[styles.dot, { backgroundColor: paid ? colors.success : colors.warning }]} />
-      <AppText style={[styles.text, { color: paid ? colors.success : colors.warning }]}>{LABELS[status]}</AppText>
+    <View style={[styles.badge, { backgroundColor: style.bg }]}>
+      <View style={[styles.dot, { backgroundColor: style.fg }]} />
+      <AppText style={[styles.text, { color: style.fg }]}>{style.label}</AppText>
     </View>
   );
 }

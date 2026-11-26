@@ -99,7 +99,7 @@ export default function OrderScreen() {
           <View style={styles.card}>
             <View style={styles.row}>
               <AppText variant="label">Commande n° {shortOrderNumber(flow.order.id)}</AppText>
-              <StatusBadge status={flow.order.status} />
+              <StatusBadge status={flow.phase === "interrupted" ? "unknown" : flow.order.status} />
             </View>
             {flow.paymentId ? (
               <AppText variant="caption" selectable>
@@ -143,6 +143,8 @@ export default function OrderScreen() {
                 onValueChange={setSimulateCut}
                 disabled={busy}
                 trackColor={{ true: colors.accent, false: colors.border }}
+                thumbColor={colors.surface}
+                ios_backgroundColor={colors.border}
                 accessibilityLabel="Simuler une coupure réseau pendant le paiement"
               />
             </View>
