@@ -1,23 +1,24 @@
-# ZIKO SHOP — boutique mobile de pulls à Kinshasa
+# Ziko Shop — Modern Wear. Smart Shopping.
 
 [![CI](https://github.com/Risthan/ziko-shop/actions/workflows/ci.yml/badge.svg)](https://github.com/Risthan/ziko-shop/actions/workflows/ci.yml)
 
 Test technique « Développeur fullstack » pour Ziko : une **API** (Node.js, Express, TypeScript, PostgreSQL) qui gère des produits, des commandes et leur paiement, et une **app mobile** (React Native, Expo, TypeScript) branchée dessus.
 
-ZIKO SHOP vend trois modèles de pulls (Le Classique, L'Essentiel, Le Signature), chacun en trois couleurs, avec des prix en francs congolais.
+Ziko Shop vend trois modèles de pulls (Le Classique, L'Essentiel, Le Signature), chacun en trois couleurs : Noir, Crème et Moka. Cela fait 9 produits, avec des prix en francs congolais. L'objectif est double : une app qui donne l'impression d'être déjà commercialisée, et, derrière, **un paiement qui ne débite jamais deux fois**, même quand le réseau coupe ou que les requêtes arrivent en même temps.
 
 | | Lien |
 |---|---|
 | API en ligne | https://ziko-shop-api.onrender.com (`/health`, `/products`) |
-| App (EAS Update, Expo Go) | https://expo.dev/accounts/risthan243/projects/ziko-shop — onglet « Updates », branche `production`, bouton « Aperçu » (QR code à scanner avec Expo Go) |
+| App (EAS Update, Expo Go) | https://expo.dev/accounts/risthan243/projects/ziko-shop. Onglet « Updates », branche `production`, bouton « Aperçu » : QR code à scanner avec Expo Go. |
 | Dépôt | https://github.com/Risthan/ziko-shop |
 
 <p>
-  <img src="docs/screenshots/1-liste.jpg" width="180" alt="Liste des produits" />
-  <img src="docs/screenshots/2-fiche.jpg" width="180" alt="Fiche produit" />
-  <img src="docs/screenshots/3-commande.jpg" width="180" alt="Commande" />
-  <img src="docs/screenshots/4-coupure.jpg" width="180" alt="Coupure réseau pendant le paiement" />
-  <img src="docs/screenshots/5-payee.jpg" width="180" alt="Commande payée, une seule fois" />
+  <img src="docs/screenshots/1-accueil.jpg" width="150" alt="Accueil" />
+  <img src="docs/screenshots/2-fiche.jpg" width="150" alt="Fiche produit" />
+  <img src="docs/screenshots/3-commande.jpg" width="150" alt="Commande" />
+  <img src="docs/screenshots/4-paiement.jpg" width="150" alt="Paiement" />
+  <img src="docs/screenshots/5-coupure.jpg" width="150" alt="Connexion interrompue pendant le paiement" />
+  <img src="docs/screenshots/6-confirmation.jpg" width="150" alt="Commande confirmée, débitée une seule fois" />
 </p>
 
 ---
@@ -25,14 +26,16 @@ ZIKO SHOP vend trois modèles de pulls (Le Classique, L'Essentiel, Le Signature)
 ## Sommaire
 
 1. [Lancer le projet](#1-lancer-le-projet)
-2. [L'API](#2-lapi)
-3. [Le point le plus important : jamais deux paiements](#3-le-point-le-plus-important--jamais-deux-paiements)
-4. [L'app mobile](#4-lapp-mobile)
-5. [Choix techniques et pourquoi](#5-choix-techniques-et-pourquoi)
-6. [Sécurité : failles repérées et ce que j'ai fait](#6-sécurité--failles-repérées-et-ce-que-jai-fait)
-7. [Ce que j'améliorerais avec plus de temps](#7-ce-que-jaméliorerais-avec-plus-de-temps)
-8. [Ce que l'IA a écrit, ce que j'ai fait](#8-ce-que-lia-a-écrit-ce-que-jai-fait)
-9. [Organisation du dépôt](#9-organisation-du-dépôt)
+2. [Architecture](#2-architecture)
+3. [L'API](#3-lapi)
+4. [Le point le plus important : jamais deux paiements](#4-le-point-le-plus-important--jamais-deux-paiements)
+5. [L'app mobile](#5-lapp-mobile)
+6. [Choix techniques et pourquoi](#6-choix-techniques-et-pourquoi)
+7. [Sécurité : failles repérées et ce que j'ai fait](#7-sécurité--failles-repérées-et-ce-que-jai-fait)
+8. [Ce que j'améliorerais avec plus de temps](#8-ce-que-jaméliorerais-avec-plus-de-temps)
+9. [Scénario de la vidéo de démonstration](#9-scénario-de-la-vidéo-de-démonstration)
+10. [Ce que l'IA a écrit, ce que j'ai fait](#10-ce-que-lia-a-écrit-ce-que-jai-fait)
+11. [Organisation du dépôt](#11-organisation-du-dépôt)
 
 ---
 
@@ -58,15 +61,16 @@ npm run db:local          # terminal 1 : lance un vrai PostgreSQL local (aucune 
 npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ```
 
-`npm run db:local` démarre PostgreSQL grâce au paquet `embedded-postgres`. Vous pouvez aussi utiliser votre propre base : il suffit de changer `DATABASE_URL` dans `.env`. Au démarrage, les migrations s'appliquent, puis la boutique est remplie si elle est vide (`SEED_ON_START=true`).
+`npm run db:local` démarre PostgreSQL grâce au paquet `embedded-postgres`. Vous pouvez aussi utiliser votre propre base en changeant `DATABASE_URL` dans `.env`. Au démarrage, les migrations s'appliquent, puis la boutique est remplie si elle est vide (`SEED_ON_START=true`).
 
 ### Les tests
 
 ```bash
-cd server
-npm test        # 46 tests, sur un vrai PostgreSQL jetable démarré automatiquement
-npm run typecheck
+cd server && npm test      # 46 tests sur un vrai PostgreSQL jetable (concurrence comprise)
+cd mobile && npm test      # 14 tests : paiement côté app (coupures, réouverture, double clic), formatage
 ```
+
+Les deux suites, le typage et la construction de l'image Docker tournent aussi dans la CI GitHub à chaque push.
 
 ### L'app mobile
 
@@ -88,7 +92,7 @@ npx eas-cli@latest login
 npx eas-cli@latest update --branch production --environment production --message "…"
 ```
 
-L'app ne contient aucun module natif en dehors d'Expo Go. Elle est publiée avec `runtimeVersion: { policy: "sdkVersion" }`, soit le runtime `exposdk:58.0.0`, ce qui permet à Expo Go de l'ouvrir directement. Le fichier `.env` local n'est pas utilisé par `--environment production` : l'app publiée appelle l'API en ligne.
+L'app n'utilise que des modules inclus dans Expo Go. Elle est publiée avec `runtimeVersion: { policy: "sdkVersion" }`, soit le runtime `exposdk:58.0.0`, que Expo Go ouvre directement. Avec `--environment production`, le fichier `.env` local est ignoré : l'app publiée appelle l'API en ligne.
 
 ### Variables d'environnement du serveur
 
@@ -99,20 +103,43 @@ L'app ne contient aucun module natif en dehors d'Expo Go. Elle est publiée avec
 | `ADMIN_API_KEY` | Clé exigée pour créer un produit. Au moins 16 caractères, obligatoire en production. |
 | `SEED_ON_START` | `true` : ajoute les 9 pulls si la boutique est vide. |
 | `CORS_ORIGINS` | Origines autorisées (`*` par défaut). |
-| `DECART_API_KEY` / `ANYWEAR_DOMAIN` | Facultatives : activent l'essayage en direct (voir plus bas). |
+| `DECART_API_KEY` / `ANYWEAR_DOMAIN` | Facultatives : activent l'essayage en direct (voir § 5). |
 
 ### Déploiement
 
-Le fichier `render.yaml` crée sur Render l'API (via Docker) et sa base PostgreSQL, gratuitement, dans la région Francfort. C'est la région la plus proche de Kinshasa parmi celles de Render. Il suffit de choisir **New → Blueprint → ce dépôt**.
+Le fichier `render.yaml` crée sur Render l'API (via Docker) et sa base PostgreSQL, gratuitement, dans la région Francfort. C'est la plus proche de Kinshasa parmi celles de Render. Il suffit de choisir **New → Blueprint → ce dépôt**.
 
-L'hébergement gratuit met l'API en veille après 15 minutes sans visite, et le premier appel prend alors jusqu'à une minute. Deux parades :
+L'hébergement gratuit met l'API en veille après 15 minutes sans visite. Deux parades :
 
-- l'app affiche un message « le serveur se réveille » et attend jusqu'à 75 secondes ;
+- l'app attend jusqu'à 75 secondes en expliquant que le serveur se réveille ;
 - un workflow GitHub (`keep-alive.yml`) garde l'API éveillée.
 
 ---
 
-## 2. L'API
+## 2. Architecture
+
+```mermaid
+flowchart LR
+  subgraph App["App mobile (Expo, React Native)"]
+    UI["Écrans<br/>(Design System src/ui)"] --> Q["TanStack Query<br/>cache partagé"]
+    UI --> P["Contrôleur de paiement<br/>(src/lib/payment)"]
+    P --> S[("AsyncStorage<br/>identifiants de paiement")]
+    Q --> C["Client HTTP typé<br/>(src/api)"]
+    P --> C
+  end
+  C -- HTTPS / JSON --> API["API Express<br/>(server/src)"]
+  API --> DB[("PostgreSQL<br/>source de vérité")]
+  UI -. navigateur .-> T["/essayage<br/>(page servie par l'API)"]
+  T -. WebRTC .-> D["Decart / AnyWear"]
+```
+
+- **Le serveur et PostgreSQL font foi.** L'app ne stocke ni prix ni stock. Elle garde seulement les identifiants de ses commandes et de ses paiements, pour pouvoir reprendre un paiement incertain.
+- **Côté app**, chaque écran lit ses données via TanStack Query. Après un paiement confirmé, la commande est mise à jour et le catalogue est rechargé, ce qui actualise le stock.
+- **L'essayage en direct** est un module isolé. Sans configuration, l'app reste complète.
+
+---
+
+## 3. L'API
 
 Toutes les réponses sont en JSON. Les erreurs ont toujours la même forme, avec un **code stable** (utilisé par l'app) et un **message clair en français** :
 
@@ -128,7 +155,7 @@ Toutes les réponses sont en JSON. Les erreurs ont toujours la même forme, avec
 | 3 | `POST /orders` | Commander `{ productId, quantity }`. Refusée si le stock est insuffisant, sinon `en_attente`. En-tête `Idempotency-Key` facultatif. | 201, 200 (déjà créée), 400, 404, 409 |
 | 4 | `POST /orders/:id/pay` | Payer `{ paymentId }`. La commande passe à `payee` et le stock diminue. | 200, 400, 404, 409 |
 | 5 | `GET /orders/:id` | Consulter une commande et son statut. | 200, 404 |
-| | `GET /health`, `GET /features` | État du serveur, fonctionnalités facultatives actives. | 200 |
+| | `GET /health`, `/features`, `/try-on/config` | État du serveur, fonctionnalités facultatives actives. | 200 |
 
 Règles de données :
 
@@ -137,8 +164,6 @@ Règles de données :
 - **Quantité** : de 1 à 100.
 - **Identifiant de paiement** : 8 à 64 caractères (lettres, chiffres, `-` ou `_`).
 - **Le serveur calcule lui-même le prix et le total.** Le client n'envoie jamais de montant.
-
-Exemple de parcours complet :
 
 ```bash
 API=https://ziko-shop-api.onrender.com
@@ -151,9 +176,11 @@ curl $API/orders/<orderId>
 
 ---
 
-## 3. Le point le plus important : jamais deux paiements
+## 4. Le point le plus important : jamais deux paiements
 
 > Si le même paiement est envoyé deux fois, ou si la commande est déjà payée, rien ne doit être débité ni décompté une seconde fois.
+
+La garantie repose sur **le serveur et la base de données**. L'app, elle, fait en sorte de toujours renvoyer le **même** identifiant, et d'afficher au client ce qui s'est réellement passé.
 
 ### Côté serveur (`server/src/orders/orders.service.ts`, fonction `payOrder`)
 
@@ -161,155 +188,208 @@ Tout se passe dans **une seule transaction PostgreSQL** :
 
 1. **`SELECT … FROM orders WHERE id = $1 FOR UPDATE`** verrouille la ligne de la commande. Si deux requêtes de paiement arrivent en même temps pour la même commande, la seconde **attend** que la première ait fini.
 2. Une fois le verrou obtenu, on **relit le statut** :
-   - **déjà payée avec le même identifiant** : c'est une répétition (réseau coupé, l'app a réessayé). On répond `200` avec `payment.outcome = "already_processed"`, **sans rien refaire** ;
+   - **déjà payée avec le même identifiant** : c'est une répétition. On répond `200` avec `payment.outcome = "already_processed"`, **sans rien refaire** ;
    - **déjà payée avec un autre identifiant** : refus `409 ORDER_ALREADY_PAID`, aucun débit.
 3. Un identifiant de paiement déjà utilisé pour **une autre commande** est refusé (`409 PAYMENT_ID_ALREADY_USED`).
-4. Le stock est relu sous verrou. S'il ne suffit plus, on renvoie `409 INSUFFICIENT_STOCK` et rien n'est débité.
+4. Le stock est relu **sous verrou**. S'il ne suffit plus, on renvoie `409 INSUFFICIENT_STOCK` et rien n'est débité.
 5. Sinon, **dans la même transaction**, trois opérations : le stock diminue, le paiement est enregistré, la commande passe à `payee`. C'est **tout ou rien**.
 
-**Filet de sécurité dans la base**, même en cas de bug applicatif :
+**Filet de sécurité dans la base** : la clé primaire `payments.id` est l'identifiant de paiement, `UNIQUE (order_id)` interdit deux paiements pour une commande, et `CHECK (stock >= 0)` interdit un stock négatif.
 
-- la table `payments` a pour **clé primaire l'identifiant de paiement**, qui ne peut donc pas être enregistré deux fois ;
-- elle impose aussi **une contrainte `UNIQUE` sur `order_id`** : une commande ne peut pas avoir deux paiements ;
-- `CHECK (stock >= 0)` empêche le stock de devenir négatif.
+### Côté app (`mobile/src/lib/payment/paymentController.ts`)
+
+1. Au premier appui sur « Payer », l'app crée **un identifiant de paiement unique** pour la commande.
+2. Elle l'**enregistre sur le téléphone (AsyncStorage) avant d'envoyer la requête**. Si l'app se ferme en plein paiement, l'identifiant n'est pas perdu.
+3. Chaque nouvelle tentative renvoie **exactement le même identifiant**, même après une fermeture et une réouverture de l'app. Il n'est jamais régénéré pour une simple relance.
+4. **Une seule requête à la fois** par commande : un double appui partage la requête en cours. Le bouton est aussi désactivé pendant le traitement, mais ce n'est qu'un confort ; la garantie reste celle du serveur.
+5. **Une réponse absente n'est jamais traitée comme un échec.** L'écran « Connexion interrompue » dit : « Nous n'avons pas encore pu confirmer le statut de votre paiement. » Il propose « Réessayer » (même identifiant) ou « Vérifier le statut » (`GET /orders/:id`, le serveur fait foi).
+6. Si le serveur répond « déjà enregistré », l'app affiche : « Votre paiement avait déjà été enregistré. Votre commande est confirmée. Aucun paiement supplémentaire n'a été effectué. »
+7. **La confirmation n'apparaît que si le serveur dit que la commande est payée.** Au lancement suivant, l'accueil rappelle un paiement resté à confirmer.
 
 ```mermaid
 sequenceDiagram
   participant App
+  participant Tel as Téléphone (AsyncStorage)
   participant API
   participant DB as PostgreSQL
+  App->>Tel: enregistre paymentId = MM-abc pour la commande 42
   App->>API: POST /orders/42/pay { paymentId: MM-abc }
-  API->>DB: BEGIN ; SELECT … FOR UPDATE (verrou)
-  API->>DB: stock - 2, INSERT payment, statut = payee ; COMMIT
+  API->>DB: BEGIN ; SELECT … FOR UPDATE ; stock - 2 ; INSERT payment ; payee ; COMMIT
   API--xApp: réponse perdue (réseau coupé)
   Note over App: « Connexion interrompue »<br/>statut « À confirmer »
-  App->>API: POST /orders/42/pay { paymentId: MM-abc } (le MÊME)
+  App->>Tel: relit paymentId = MM-abc (même après réouverture)
+  App->>API: POST /orders/42/pay { paymentId: MM-abc }
   API->>DB: SELECT … FOR UPDATE : déjà payée par MM-abc
-  API-->>App: 200 outcome = already_processed (rien n'est refait)
-  Note over App: « Paiement confirmé — déjà enregistré.<br/>Débité une seule fois. »
+  API-->>App: 200 already_processed (rien n'est refait)
+  Note over App: « Commande confirmée — paiement déjà enregistré,<br/>aucun débit supplémentaire »
 ```
 
-### Côté app (`mobile/src/lib/usePaymentFlow.ts`)
+### Ce qui le prouve
 
-- L'app crée **un identifiant de paiement par commande**, au premier appui sur « Payer ». Elle le **réutilise à l'identique** à chaque nouvelle tentative. C'est ce qui permet au serveur de reconnaître une répétition.
-- La création de commande porte aussi une **clé d'idempotence**. Si le réseau coupe à ce moment-là, réessayer ne crée pas une seconde commande.
-- Les échecs sont classés en trois familles, car ils n'appellent pas la même réponse :
-  - **réseau coupé ou délai dépassé** : on ne sait pas si le serveur a traité le paiement. L'app affiche « Connexion interrompue », le statut « À confirmer », et propose « Réessayer » avec le même identifiant, ou « Vérifier le statut » ;
-  - **refus métier** (stock épuisé, commande introuvable) : message clair et « aucun débit n'a été effectué » ;
-  - **succès** : l'app distingue « payé à l'instant » de « ce paiement avait déjà été enregistré ».
-- **Mode démo** (interrupteur sur l'écran de paiement) : la requête part vraiment au serveur, puis l'app fait comme si la réponse s'était perdue. C'est exactement le cas du réseau qui coupe pendant le paiement, et il est reproductible pendant la vidéo. Couper le Wi-Fi ou passer en mode avion marche aussi.
-
-### Ce qui le prouve (`server/test/payment.test.ts`)
-
-Les tests tournent sur un vrai PostgreSQL. Chacun vérifie la réponse HTTP **et** l'état de la base : stock et nombre de paiements.
-
-- le même paiement renvoyé : 200 `already_processed`, stock inchangé ;
-- **10 envois simultanés** du même paiement : 1 seul `processed`, 1 seul paiement en base ;
-- 5 identifiants différents envoyés en même temps : un seul passe, les autres reçoivent 409 ;
-- deux clients pour la dernière pièce : un seul paie, et le stock reste à 0 ;
-- un identifiant réutilisé sur une autre commande : 409.
+| Scénario | Où | Résultat vérifié |
+|---|---|---|
+| Même paiement renvoyé | `server/test/payment.test.ts` | 200 `already_processed`, stock inchangé |
+| 10 envois simultanés du même paiement | idem | 1 seul `processed`, 1 seul paiement en base |
+| 5 identifiants différents en même temps | idem | un seul passe, les autres 409 |
+| Deux clients pour la dernière pièce | idem | un seul paie, le stock reste à 0 |
+| Identifiant déjà utilisé ailleurs | idem | 409, la seconde commande reste en attente |
+| Identifiant enregistré avant l'envoi | `mobile/src/lib/payment/paymentController.test.ts` | vrai au moment de l'appel réseau |
+| Coupure **avant** que le serveur reçoive | idem | la relance paie, même identifiant, 1 débit |
+| Coupure **après** l'enregistrement | idem | la relance confirme, même identifiant, 1 débit |
+| Réouverture de l'app après une coupure | idem | identifiant relu, aucun nouveau créé |
+| Double clic sur « Payer » | idem | une seule requête envoyée |
 
 ---
 
-## 4. L'app mobile
+## 5. L'app mobile
 
-Expo SDK 58, Expo Router et TypeScript strict. L'app fonctionne sur iPhone et Android, et reste lisible sur petit écran : textes plafonnés à ×1,35 avec la taille système, grille en 2 colonnes et boutons de 44 px minimum.
+Expo SDK 58, Expo Router, TypeScript strict, TanStack Query, Reanimated et Manrope. L'app fonctionne sur iPhone et Android dans Expo Go.
 
-1. **Liste des produits** (`src/app/index.tsx`) : chargée depuis l'API. Elle affiche un indicateur pendant le chargement, puis « le serveur se réveille… » si l'attente dure. Un message clair et un bouton « Réessayer » apparaissent si le serveur ne répond pas. On peut tirer pour rafraîchir. La recherche par nom ignore les accents : « creme » trouve « Crème ».
-2. **Fiche produit** (`src/app/product/[id].tsx`) : nom, prix au format « 75 000 FC », stock, pastilles des autres couleurs du modèle et bouton « Commander ». Le bouton est désactivé en cas de rupture.
-3. **Commande et paiement** (`src/app/order/[productId].tsx`) : quantité modifiable (dans la limite du stock), total mis à jour, bouton « Payer ». L'app affiche ensuite le statut final : `Payée`, `En attente` ou `À confirmer`, avec le numéro de commande et l'identifiant de paiement.
+### Écrans
 
-Le design reprend la direction visuelle ZIKO SHOP (dossier `docs/design`) : fond crème `#F5F3EF`, noir profond, accent moka, titres en Playfair Display et texte en Inter.
+| Écran | Fichier | Contenu |
+|---|---|---|
+| Accueil et catalogue | `src/app/(tabs)/index.tsx` | Bannière « Votre style. Vos règles. », recherche par nom (sans accents), collections, grille de 2 produits par ligne (nom, prix « 75 000 FC », stock, couleurs), squelettes de chargement, états vide, sans résultat et serveur injoignable. Rappel d'un paiement à confirmer. |
+| Fiche produit | `src/app/product/[id].tsx` | Photo, vignettes et pastilles des couleurs (changement en place : image, prix et stock), bouton « Commander » (désactivé si épuisé), « Essayer en direct ». |
+| Essayage en direct | `src/app/(tabs)/essayage.tsx` | Choix du modèle et de la couleur, état du service, consentement caméra, lancement de la séance. On peut toujours commander, même sans IA. |
+| Commande | `src/app/order/[productId].tsx` | Un produit et une quantité (comme le demande le sujet), total recalculé, création de la commande. Une fenêtre s'affiche en cas de stock insuffisant. |
+| Paiement | `src/app/payment/[orderId].tsx` | Référence réelle, montant, statut, Mobile Money **marqué comme démonstration**, bouton « Payer », mode démo « couper le réseau ». |
+| Connexion interrompue | idem (`Interrupted`) | « Nous n'avons pas encore pu confirmer… », « Réessayer le paiement », « Vérifier le statut de ma commande ». |
+| Confirmation | `src/app/confirmation/[orderId].tsx` | Animation de validation, référence, produit, quantité, total payé, statut « Payée ». |
+| Suivi et « Mes commandes » | `src/app/orders/[id].tsx`, `src/app/(tabs)/commandes.tsx` | Statut réel du serveur (« En attente » ou « Payée ») et bouton d'actualisation. Pas de faux suivi de livraison. |
+
+### Design System (`src/theme`, `src/ui`)
+
+- **Jetons centralisés** :
+  - couleurs : fond `#090D10`, surfaces `#171E24`, accent `#D0F54B` ;
+  - typographie Manrope, du Regular à l'ExtraBold ;
+  - espacements, rayons, ombres discrètes (pas d'effet néon) et durées d'animation.
+- **Composants réutilisés par tous les écrans** : boutons, en-tête avec le logo officiel, barre d'onglets, cartes produits, pastilles de couleurs, sélecteur de quantité, badges de stock et de statut, messages, fenêtre modale, squelettes, états vides et d'erreur, récapitulatif de commande, coche animée et preloader.
+- **Animations Reanimated** :
+  - apparition en cascade des produits ;
+  - pression des boutons (avec retour haptique) ;
+  - fondu des images au changement de couleur ;
+  - quantité animée ;
+  - validation du paiement ;
+  - preloader affiché **à la première ouverture uniquement**.
+
+  Toutes respectent le réglage « réduire les animations » du téléphone.
+- **Petits écrans** : textes plafonnés à ×1,3 de la taille système, zones tactiles de 44 px minimum, safe areas, bouton retour Android géré.
 
 ### Bonus : l'essayage en direct
 
-Sur la fiche produit, un bouton « Essayer en direct » ouvre la page `/essayage` de l'API. Le client s'y voit porter le pull, en vidéo, avec la caméra de son téléphone. Cette fonctionnalité est **facultative et isolée** (`server/src/tryon`) : sans configuration, le bouton n'apparaît pas, et rien du reste n'en dépend.
+Le bouton « Lancer l'essayage » ouvre la page `/essayage` de l'API dans le navigateur du téléphone (caméra frontale + IA). C'est la solution qui fonctionne dans Expo Go sans module natif. La fonctionnalité est **facultative et isolée** (`server/src/tryon`) :
 
-- **Mode Decart** (`DECART_API_KEY`) : modèle temps réel `lucy-vton` via WebRTC. La clé reste sur le serveur. Le navigateur ne reçoit qu'un jeton de 60 secondes, limité à ce modèle, à l'origine de la page et à des séances de 45 secondes.
-- **Mode AnyWear** (`ANYWEAR_DOMAIN`) : charge le widget officiel AnyWear de Decart, une fois le domaine activé sur anywear.decart.ai/install.
-
----
-
-## 5. Choix techniques et pourquoi
-
-- **Express 5 et SQL direct (`pg`), sans ORM.** Le cœur du sujet est une transaction avec verrou. Écrite en SQL lisible, elle s'explique ligne par ligne, sans magie cachée. Express 5 gère nativement les erreurs des fonctions `async`.
-- **Le verrou pessimiste (`SELECT … FOR UPDATE`) plutôt qu'un verrou optimiste.** Les paiements concurrents sur une même commande sont rares mais critiques. Le verrou les met en file d'attente, et la seconde requête lit l'état final pour répondre précisément. Les contraintes `UNIQUE` servent de seconde ligne de défense.
-- **L'identifiant de paiement sert de clé d'idempotence.** C'est l'identifiant naturel d'un paiement Mobile Money : pas besoin d'inventer une autre clé.
-- **Le stock diminue au paiement, pas à la commande**, comme le demande le sujet. Il est donc revérifié sous verrou au moment de payer.
-- **zod** valide toutes les entrées, avec des messages en français, et la configuration est validée au démarrage. Des bornes claires évitent les montants absurdes.
-- **Les tests tournent contre un vrai PostgreSQL** (`embedded-postgres`). Les verrous et la concurrence ne se simulent pas de façon fiable : il faut une vraie base.
-- **L'app n'utilise pas de bibliothèque d'état.** Un hook dédié (`usePaymentFlow`) contient toute la logique de paiement, séparée de l'affichage. C'est simple à lire et à faire évoluer.
-- **La recherche se fait côté app** (9 produits, instantanée et tolérante aux accents). L'API propose aussi `?search=` pour un catalogue plus grand.
-- **Render gratuit et Docker.** Le même conteneur tourne en local (`docker compose`), en CI et en production.
+- **Mode Decart** (`DECART_API_KEY`) : modèle temps réel `lucy-vton` via WebRTC. La clé reste sur le serveur. Le navigateur ne reçoit qu'un jeton de 60 secondes, limité au modèle, à l'origine de la page et à des séances de 45 secondes.
+- **Mode AnyWear** (`ANYWEAR_DOMAIN`) : charge le widget officiel AnyWear de Decart, une fois le domaine activé par Decart.
+- **Sans configuration** : l'app affiche « Service indisponible » et propose de commander. Aucune photo n'est présentée comme un flux vidéo.
 
 ---
 
-## 6. Sécurité : failles repérées et ce que j'ai fait
+## 6. Choix techniques et pourquoi
+
+- **Express 5 et SQL direct (`pg`), sans ORM.** Le cœur du sujet est une transaction avec verrou. Écrite en SQL lisible, elle s'explique ligne par ligne.
+- **Le verrou pessimiste (`SELECT … FOR UPDATE`) plutôt qu'un verrou optimiste.** Les paiements concurrents sur une même commande sont rares mais critiques. La seconde requête attend puis lit l'état final pour répondre précisément. Les contraintes `UNIQUE` servent de seconde ligne de défense.
+- **L'identifiant de paiement sert de clé d'idempotence.** C'est l'identifiant naturel d'un paiement Mobile Money.
+- **Le stock diminue au paiement**, comme le demande le sujet. Il est donc revérifié sous verrou au moment de payer.
+- **La logique de paiement de l'app est indépendante de React** (`paymentController.ts`). On peut ainsi la tester sans téléphone, avec un faux serveur qui applique les mêmes règles.
+- **TanStack Query plutôt qu'un store global** : le serveur reste la source de vérité, les écrans partagent un cache, et les écritures ne sont jamais rejouées automatiquement.
+- **Tests serveur contre un vrai PostgreSQL** (`embedded-postgres`) : les verrous et la concurrence ne se simulent pas de façon fiable.
+- **Commande d'un seul produit**, comme demandé. Les maquettes montraient un panier de plusieurs produits ; je ne l'ai pas ajouté pour ne pas modifier le modèle de données sans raison.
+- **Render gratuit et Docker** : le même conteneur tourne en local, en CI et en production.
+
+---
+
+## 7. Sécurité : failles repérées et ce que j'ai fait
 
 | Faille possible | Ce que j'ai fait | Ce qui reste |
 |---|---|---|
-| **Paiement non vérifié auprès d'un opérateur.** N'importe qui connaissant l'identifiant d'une commande pourrait la « payer » avec un identifiant inventé. | Identifiants de commande aléatoires (UUID v4) et impossibles à deviner. Montant calculé et figé côté serveur. Identifiant de paiement unique. Limite de 30 paiements par minute et par IP. | En production : vérifier chaque paiement auprès de l'opérateur Mobile Money (API ou webhook signé HMAC), avec contrôle du montant. C'est la limite principale de ce test. |
-| **Création de produits par n'importe qui.** | En-tête `X-Admin-Key` comparé à temps constant. Clé d'au moins 16 caractères, obligatoire en production. Sur Render, elle est générée automatiquement et transmise séparément aux évaluateurs. | Vrais comptes administrateurs avec rôles. |
-| **Lecture des commandes d'autrui (IDOR).** | UUID impossibles à deviner, et aucune route ne liste les commandes. | Comptes clients ou jeton secret propre à chaque commande. |
-| **Injection SQL.** | Requêtes paramétrées partout. Recherche `LIKE` échappée : `%` et `_` sont traités comme du texte. | — |
-| **Montants ou quantités manipulés.** | Validation stricte (entiers, bornes). Prix et total calculés par le serveur. Contraintes `CHECK` en base, dont `total = prix × quantité` et `stock >= 0`. | — |
-| **Double débit en concurrence.** | Verrou, transaction unique et contraintes `UNIQUE`, testés avec 10 requêtes simultanées. | — |
-| **Abus ou déni de service.** | Limite globale de 300 requêtes par 15 minutes et par IP. Corps JSON de 10 ko maximum. Requêtes SQL coupées après 10 secondes. | Un pare-feu applicatif ou un CDN en production. |
-| **Fuite d'informations.** | Erreurs 500 génériques, sans pile d'appels. `X-Powered-By` désactivé. En-têtes de sécurité via `helmet`. Certificat TLS de la base vérifié. | Journalisation centralisée et alertes. |
-| **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé Decart ne part jamais vers le navigateur, qui reçoit un jeton court et restreint. | Rotation des clés. |
-| **Script tiers (widget AnyWear).** | Autorisé uniquement sur `/essayage`, avec une politique de sécurité (CSP) dédiée. L'accès à la caméra est limité à cette page. | Figer une version du widget plutôt que `latest`. |
-| **CORS ouvert (`*`).** | Acceptable ici : l'API n'utilise ni cookie ni session, et l'app mobile n'est pas soumise à CORS. Configurable via `CORS_ORIGINS`. | Restreindre si un site web est ajouté. |
-
-Le conteneur Docker tourne **sans les droits root**.
+| **Paiement non vérifié auprès d'un opérateur.** N'importe qui connaissant l'identifiant d'une commande pourrait la « payer » avec un identifiant inventé. | Identifiants de commande aléatoires (UUID v4). Montant calculé et figé côté serveur. Identifiant de paiement unique. Limite de 30 paiements par minute et par IP. L'app indique clairement que le Mobile Money est simulé. | En production : vérifier chaque paiement auprès de l'opérateur (API ou webhook signé HMAC), avec contrôle du montant. C'est la limite principale de ce test. |
+| **Création de produits par n'importe qui.** | En-tête `X-Admin-Key` comparé à temps constant, obligatoire en production. Sur Render, la clé est générée automatiquement et transmise séparément aux évaluateurs. | Vrais comptes administrateurs avec rôles. |
+| **Lecture des commandes d'autrui (IDOR).** | UUID impossibles à deviner, et aucune route ne liste les commandes. | Comptes clients ou jeton propre à chaque commande. |
+| **Injection SQL.** | Requêtes paramétrées partout. Recherche `LIKE` échappée. | — |
+| **Montants ou quantités manipulés.** | Validation stricte (entiers, bornes). Prix et total calculés par le serveur. Contraintes `CHECK` en base. | — |
+| **Double débit en concurrence.** | Verrou, transaction unique et contraintes `UNIQUE`, testés avec 10 requêtes simultanées. Côté app, identifiant persistant et une seule requête à la fois. | — |
+| **Abus ou déni de service.** | Limite globale de 300 requêtes par 15 minutes et par IP. Corps JSON de 10 ko maximum. Requêtes SQL coupées après 10 secondes. | Pare-feu applicatif ou CDN. |
+| **Fuite d'informations.** | Erreurs 500 génériques. `X-Powered-By` désactivé. En-têtes `helmet`. Certificat TLS de la base vérifié. | Journalisation centralisée. |
+| **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé Decart ne part jamais vers le navigateur. Le téléphone ne stocke que des identifiants (aucune donnée personnelle). | Rotation des clés. |
+| **Script tiers (widget AnyWear).** | Autorisé uniquement sur `/essayage`, avec une politique de sécurité (CSP) dédiée. La caméra est limitée à cette page, et rien ne part sans le consentement explicite du client. | Figer une version du widget. |
+| **CORS ouvert (`*`).** | Acceptable : ni cookie ni session, et l'app mobile n'est pas soumise à CORS. Configurable via `CORS_ORIGINS`. | Restreindre si un site web est ajouté. |
 
 ---
 
-## 7. Ce que j'améliorerais avec plus de temps
+## 8. Ce que j'améliorerais avec plus de temps
 
-- **Un vrai paiement Mobile Money** (M-Pesa, Orange Money, Airtel Money, via un agrégateur), confirmé par un webhook signé, avec un statut intermédiaire « en cours ».
-- **Réserver le stock** pendant 15 minutes à la création de la commande, pour éviter qu'un client découvre une rupture au moment de payer.
-- **Garder le paiement en cours sur le téléphone** (AsyncStorage) pour le reprendre si l'app est fermée en plein paiement.
-- Comptes clients, historique des commandes et panier de plusieurs produits.
-- Tests de bout en bout de l'app (Maestro), documentation OpenAPI et suivi des erreurs (Sentry).
+- **Un vrai paiement Mobile Money** (M-Pesa, Orange Money, Airtel Money, via un agrégateur), confirmé par un webhook signé, avec un statut « en cours ».
+- **Réserver le stock** quelques minutes à la création de la commande.
+- Comptes clients, historique synchronisé entre appareils, panier de plusieurs produits et tailles (le modèle de données n'en a pas aujourd'hui).
+- Un essayage IA intégré dans l'app (build de développement avec WebRTC natif) au lieu du navigateur.
+- Tests de bout en bout sur téléphone (Maestro), documentation OpenAPI, suivi des erreurs (Sentry).
 - Un hébergement payant (pas de mise en veille) et un CDN pour les images.
 
 ---
 
-## 8. Ce que l'IA a écrit, ce que j'ai fait
+## 9. Scénario de la vidéo de démonstration
+
+Durée : 3 à 4 minutes. On filme l'écran du téléphone, avec Expo Go et l'app publiée.
+
+1. **0:00 – Ouverture** (15 s) : le preloader de première ouverture, puis l'accueil. Montrer la bannière, la recherche (« moka ») et les collections.
+2. **0:20 – Catalogue et fiche** (40 s) :
+   - ouvrir « L'Essentiel » et changer de couleur : la photo, le prix et le stock changent ;
+   - montrer un produit presque épuisé (badge orange) ;
+   - montrer l'onglet Essayage : modèle, couleur et consentement.
+3. **1:00 – Commande** (30 s) : « Commander », passer la quantité à 2 (le total se met à jour), puis « Continuer vers le paiement ». Montrer la référence ZK-… et le statut « En attente ».
+4. **1:30 – Paiement normal** (20 s) : « Payer ». Montrer l'animation de confirmation, « Payée », puis « Voir ma commande » et « Actualiser le statut ».
+5. **1:50 – Le réseau coupe** (60 s) :
+   - nouvelle commande, puis activer « Mode démo : couper le réseau » (ou passer en mode avion juste après avoir appuyé sur « Payer ») ;
+   - l'écran **« Connexion interrompue »** apparaît, avec le statut **« À confirmer »** et l'identifiant MM-… ;
+   - « Réessayer le paiement » mène à **« Paiement déjà enregistré… aucun débit supplémentaire »**. Le stock n'a baissé qu'une fois : revenir au catalogue pour le montrer.
+6. **2:50 – L'explication** (40 s), en quelques phrases :
+   - « Le paiement verrouille la ligne de la commande dans PostgreSQL, relit son statut, puis décompte le stock, enregistre le paiement et passe la commande à "payée" dans une seule transaction. »
+   - « L'identifiant de paiement est enregistré sur le téléphone avant l'envoi et renvoyé à l'identique : le serveur reconnaît la répétition et ne refait rien. »
+   - « La base refuse en plus un même identifiant deux fois et un second paiement pour une commande. »
+   - « Les tests le prouvent, avec 10 paiements simultanés et des coupures avant et après l'enregistrement. »
+7. **3:30 – Fin** : la CI verte sur GitHub et le README.
+
+---
+
+## 10. Ce que l'IA a écrit, ce que j'ai fait
 
 Comme le sujet l'autorise, j'ai utilisé un assistant IA (Claude, d'Anthropic) comme outil de développement.
 
-- **Écrit par l'IA, à partir de mes consignes :** la grande majorité du code (serveur, app, tests), la configuration Docker, Render et CI, ce README, ainsi que les visuels (logo, photos des 9 pulls, maquettes), générés avec l'outil d'images FLORA.
+- **Écrit par l'IA, à partir de mes consignes :** la grande majorité du code (serveur, app, tests), la configuration Docker, Render, EAS et CI, et ce README. Les visuels des produits et de la bannière ont été générés avec l'outil d'images FLORA, à partir du logo que j'ai fourni.
 - **Fait par moi :**
-  - le choix du produit et de la direction : boutique de 3 pulls, design premium, prix en francs congolais, essayage en direct inspiré d'une vidéo que j'ai repérée ;
-  - la validation des visuels et du design ;
-  - la création et la configuration des comptes et services : GitHub, Render, Expo ;
+  - le choix du produit et de la direction artistique : boutique de 3 pulls, prix en francs congolais, maquettes « Premium Dark Commerce », logo Ziko Shop, essayage en direct inspiré d'une vidéo que j'ai repérée ;
+  - la validation des visuels et des écrans à chaque étape ;
+  - la création et la configuration des comptes et services : GitHub, Render, Expo, AnyWear ;
   - le déploiement et les essais sur téléphone ;
   - la relecture du code, que je suis en mesure d'expliquer et de faire évoluer.
 
 ---
 
-## 9. Organisation du dépôt
+## 11. Organisation du dépôt
 
 ```
-server/                 API Node.js + Express + TypeScript
+server/                     API Node.js + Express + TypeScript
   src/
-    app.ts              assemblage de l'app Express (sécurité, routes, erreurs)
-    config.ts           variables d'environnement validées
-    db/                 connexion, transactions, migrations SQL, données de départ
-    products/           routes, validation et logique des produits
-    orders/             commandes et paiement (orders.service.ts : le cœur)
-    http/               erreurs, middlewares, validation
-    tryon/              essayage en direct (facultatif)
-  test/                 46 tests (Vitest + Supertest + vrai PostgreSQL)
-  web/essayage/         script de la page d'essayage (compilé par esbuild)
-  public/               images des pulls, page /essayage
-mobile/                 app Expo (React Native + TypeScript)
-  src/app/              les 3 écrans (Expo Router)
-  src/api/              client HTTP typé et gestion des erreurs réseau
-  src/lib/              logique de paiement, formatage « 35 000 FC »
-  src/components/       composants d'interface
-docs/                   direction visuelle et captures d'écran
-docker-compose.yml      API + PostgreSQL en une commande
-render.yaml             déploiement Render
+    app.ts                  assemblage de l'app Express (sécurité, routes, erreurs)
+    config.ts               variables d'environnement validées
+    db/                     connexion, transactions, migrations SQL, données de départ
+    products/               produits : routes, validation, logique
+    orders/                 commandes et paiement (orders.service.ts : le cœur)
+    http/                   erreurs, middlewares, validation
+    tryon/                  essayage en direct (facultatif)
+  test/                     46 tests (Vitest + Supertest + vrai PostgreSQL)
+  web/essayage/             script de la page d'essayage (compilé par esbuild)
+  public/                   photos des pulls, page /essayage
+mobile/                     app Expo (React Native + TypeScript)
+  src/app/                  écrans (Expo Router) : (tabs), product, order, payment, confirmation, orders
+  src/ui/                   Design System : composants réutilisables
+  src/theme/                jetons : couleurs, typographie, espacements, animations
+  src/lib/payment/          contrôleur de paiement idempotent + tests
+  src/lib/                  synchronisation (TanStack Query), stockage, formatage « 35 000 FC »
+  src/api/                  client HTTP typé et gestion des erreurs réseau
+docs/                       direction artistique, logo, captures d'écran
+docker-compose.yml          API + PostgreSQL en une commande
+render.yaml                 déploiement Render
 ```
