@@ -9,7 +9,7 @@ ZIKO SHOP vend trois modèles de pulls (Le Classique, L'Essentiel, Le Signature)
 | | Lien |
 |---|---|
 | API en ligne | https://ziko-shop-api.onrender.com (`/health`, `/products`) |
-| App (EAS Update) | _lien expo.dev ajouté après publication_ |
+| App (EAS Update, Expo Go) | https://expo.dev/accounts/risthan243/projects/ziko-shop — onglet « Updates », branche `production`, bouton « Aperçu » (QR code à scanner avec Expo Go) |
 | Dépôt | https://github.com/Risthan/ziko-shop |
 
 <p>
@@ -79,6 +79,16 @@ npx expo start            # scannez le QR code avec Expo Go
 
 - Sans fichier `.env`, l'app utilise l'API en ligne.
 - Pour l'API locale sur un téléphone, mettez l'IP de l'ordinateur, par exemple `EXPO_PUBLIC_API_URL=http://192.168.1.20:3000`. Le téléphone et l'ordinateur doivent être sur le même Wi-Fi.
+
+### Publier l'app (EAS Update)
+
+```bash
+cd mobile
+npx eas-cli@latest login
+npx eas-cli@latest update --branch production --environment production --message "…"
+```
+
+L'app ne contient aucun module natif en dehors d'Expo Go. Elle est publiée avec `runtimeVersion: { policy: "sdkVersion" }`, soit le runtime `exposdk:58.0.0`, ce qui permet à Expo Go de l'ouvrir directement. Le fichier `.env` local n'est pas utilisé par `--environment production` : l'app publiée appelle l'API en ligne.
 
 ### Variables d'environnement du serveur
 
