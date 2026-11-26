@@ -66,8 +66,8 @@ npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ### Les tests
 
 ```bash
-cd server && npm test      # 46 tests sur un vrai PostgreSQL jetable (concurrence comprise)
-cd mobile && npm test      # 14 tests : paiement côté app (coupures, réouverture, double clic), formatage
+cd server && npm test      # 61 tests sur un vrai PostgreSQL jetable (concurrence et panier compris)
+cd mobile && npm test      # 22 tests : paiement côté app (coupures, réouverture, double clic), panier, formatage
 ```
 
 Les deux suites, le typage et la construction de l'image Docker tournent aussi dans la CI GitHub à chaque push.
@@ -129,11 +129,11 @@ flowchart LR
   end
   C -- HTTPS / JSON --> API["API Express<br/>(server/src)"]
   API --> DB[("PostgreSQL<br/>source de vérité")]
-  UI -. navigateur .-> T["/essayage<br/>(page servie par l'API)"]
+  UI -. WebView dans l'app .-> T["/essayage<br/>(page servie par l'API)"]
   T -. WebRTC .-> D["Decart / AnyWear"]
 ```
 
-- **Le serveur et PostgreSQL font foi.** L'app ne stocke ni prix ni stock. Elle garde seulement les identifiants de ses commandes et de ses paiements, pour pouvoir reprendre un paiement incertain.
+- **Le serveur et PostgreSQL font foi.** L'app ne stocke ni prix ni stock. Elle garde seulement les identifiants de ses commandes et de ses paiements (pour pouvoir reprendre un paiement incertain), et le contenu du panier (identifiants et quantités).
 - **Côté app**, chaque écran lit ses données via TanStack Query. Après un paiement confirmé, la commande est mise à jour et le catalogue est rechargé, ce qui actualise le stock.
 - **L'essayage en direct** est un module isolé. Sans configuration, l'app reste complète.
 
@@ -152,8 +152,8 @@ Toutes les réponses sont en JSON. Les erreurs ont toujours la même forme, avec
 | 1 | `POST /products` | Créer un produit `{ name, priceCdf, stock, imageUrl? }`. Exige l'en-tête `X-Admin-Key`. | 201, 400, 401 |
 | 2 | `GET /products?search=` | Lister les produits (recherche facultative par nom). | 200 |
 | | `GET /products/:id` | Un produit. | 200, 404 |
-| 3 | `POST /orders` | Commander `{ productId, quantity }`. Refusée si le stock est insuffisant, sinon `en_attente`. En-tête `Idempotency-Key` facultatif. | 201, 200 (déjà créée), 400, 404, 409 |
-| 4 | `POST /orders/:id/pay` | Payer `{ paymentId }`. La commande passe à `payee` et le stock diminue. | 200, 400, 404, 409 |
+| 3 | `POST /orders` | Commander un produit `{ productId, quantity }` (format du sujet) ou un panier `{ items: [{ productId, quantity }, …] }`. Refusée si le stock d'un article est insuffisant (l'erreur dit lequel), sinon `en_attente`. En-tête `Idempotency-Key` facultatif. | 201, 200 (déjà créée), 400, 404, 409 |
+| 4 | `POST /orders/:id/pay` | Payer `{ paymentId }`. La commande passe à `payee` et le stock de chaque article diminue. | 200, 400, 404, 409 |
 | 5 | `GET /orders/:id` | Consulter une commande et son statut. | 200, 404 |
 | | `GET /health`, `/features`, `/try-on/config` | État du serveur, fonctionnalités facultatives actives. | 200 |
 
@@ -161,7 +161,8 @@ Règles de données :
 
 - **Prix** en francs congolais : un entier, de 1 à 10 000 000 FC.
 - **Stock** : un entier, de 0 à 1 000 000.
-- **Quantité** : de 1 à 100.
+- **Quantité** : de 1 à 100 par article.
+- **Panier** : de 1 à 20 articles différents, chaque produit une seule fois (les quantités sont regroupées). Une commande renvoie ses lignes dans `items`, avec le prix figé de chacune, `itemCount` (nombre de pièces) et `totalCdf`.
 - **Identifiant de paiement** : 8 à 64 caractères (lettres, chiffres, `-` ou `_`).
 - **Le serveur calcule lui-même le prix et le total.** Le client n'envoie jamais de montant.
 
@@ -169,6 +170,7 @@ Règles de données :
 API=https://ziko-shop-api.onrender.com
 curl $API/products
 curl -X POST $API/orders -H "Content-Type: application/json" -d '{"productId":"<id>","quantity":2}'
+curl -X POST $API/orders -H "Content-Type: application/json" -d '{"items":[{"productId":"<id1>","quantity":2},{"productId":"<id2>","quantity":1}]}'   # panier
 curl -X POST $API/orders/<orderId>/pay -H "Content-Type: application/json" -d '{"paymentId":"MM-2026-000001"}'
 curl -X POST $API/orders/<orderId>/pay -H "Content-Type: application/json" -d '{"paymentId":"MM-2026-000001"}'   # renvoyé : rien n'est refait
 curl $API/orders/<orderId>
@@ -191,8 +193,8 @@ Tout se passe dans **une seule transaction PostgreSQL** :
    - **déjà payée avec le même identifiant** : c'est une répétition. On répond `200` avec `payment.outcome = "already_processed"`, **sans rien refaire** ;
    - **déjà payée avec un autre identifiant** : refus `409 ORDER_ALREADY_PAID`, aucun débit.
 3. Un identifiant de paiement déjà utilisé pour **une autre commande** est refusé (`409 PAYMENT_ID_ALREADY_USED`).
-4. Le stock est relu **sous verrou**. S'il ne suffit plus, on renvoie `409 INSUFFICIENT_STOCK` et rien n'est débité.
-5. Sinon, **dans la même transaction**, trois opérations : le stock diminue, le paiement est enregistré, la commande passe à `payee`. C'est **tout ou rien**.
+4. Les produits de la commande sont verrouillés à leur tour, **toujours dans le même ordre** (par identifiant) : deux paniers qui partagent des produits ne peuvent pas se bloquer mutuellement. Le stock de chaque article est relu **sous verrou**. S'il manque une seule pièce, on renvoie `409 INSUFFICIENT_STOCK` (avec le nom de l'article) et rien n'est débité.
+5. Sinon, **dans la même transaction**, trois opérations : le stock de chaque article diminue, le paiement est enregistré, la commande passe à `payee`. C'est **tout ou rien**.
 
 **Filet de sécurité dans la base** : la clé primaire `payments.id` est l'identifiant de paiement, `UNIQUE (order_id)` interdit deux paiements pour une commande, et `CHECK (stock >= 0)` interdit un stock négatif.
 
@@ -233,6 +235,9 @@ sequenceDiagram
 | 5 identifiants différents en même temps | idem | un seul passe, les autres 409 |
 | Deux clients pour la dernière pièce | idem | un seul paie, le stock reste à 0 |
 | Identifiant déjà utilisé ailleurs | idem | 409, la seconde commande reste en attente |
+| Panier : un article épuisé entre-temps | idem | 409 avec le nom de l'article, aucun stock ne bouge |
+| Panier : 10 envois simultanés | idem | 1 seul débit, chaque stock baisse une fois |
+| Deux paniers croisés payés en même temps | idem | pas d'interblocage, stocks justes |
 | Identifiant enregistré avant l'envoi | `mobile/src/lib/payment/paymentController.test.ts` | vrai au moment de l'appel réseau |
 | Coupure **avant** que le serveur reçoive | idem | la relance paie, même identifiant, 1 débit |
 | Coupure **après** l'enregistrement | idem | la relance confirme, même identifiant, 1 débit |
@@ -250,12 +255,13 @@ Expo SDK 58, Expo Router, TypeScript strict, TanStack Query, Reanimated et Manro
 | Écran | Fichier | Contenu |
 |---|---|---|
 | Accueil et catalogue | `src/app/(tabs)/index.tsx` | Bannière « Votre style. Vos règles. », recherche par nom (sans accents), collections, grille de 2 produits par ligne (nom, prix « 75 000 FC », stock, couleurs), squelettes de chargement, états vide, sans résultat et serveur injoignable. Rappel d'un paiement à confirmer. |
-| Fiche produit | `src/app/product/[id].tsx` | Photo, vignettes et pastilles des couleurs (changement en place : image, prix et stock), bouton « Commander » (désactivé si épuisé), « Essayer en direct ». |
-| Essayage en direct | `src/app/(tabs)/essayage.tsx` | Choix du modèle et de la couleur, état du service, consentement caméra, lancement de la séance. On peut toujours commander, même sans IA. |
-| Commande | `src/app/order/[productId].tsx` | Un produit et une quantité (comme le demande le sujet), total recalculé, création de la commande. Une fenêtre s'affiche en cas de stock insuffisant. |
+| Fiche produit | `src/app/product/[id].tsx` | Photo, vignettes et pastilles des couleurs (changement en place : image, prix et stock), bouton principal « Commander » (désactivé si épuisé), « Au panier » et « Essayer ». |
+| Essayage en direct | `src/app/(tabs)/essayage.tsx` | La caméra s'ouvre **dans l'app** et l'essayage démarre tout seul. Changer de modèle ou de couleur relance l'essayage avec le nouveau pull. « Ajouter au panier » et « Commander ce pull » restent toujours possibles, même si le service d'essayage est indisponible. |
+| Panier | `src/app/(tabs)/panier.tsx` | Plusieurs pulls, chacun avec sa quantité, un raccourci « Essayer », le total, puis une seule commande pour tout le panier. Pastille du nombre de pièces sur l'onglet. Le panier se vide quand sa commande est payée. |
+| Commande | `src/app/order/[productId].tsx` | Un produit et une quantité (le parcours du sujet), total recalculé, création de la commande. Une fenêtre s'affiche en cas de stock insuffisant. |
 | Paiement | `src/app/payment/[orderId].tsx` | Référence réelle, montant, statut, Mobile Money **marqué comme démonstration**, bouton « Payer », mode démo « couper le réseau ». |
 | Connexion interrompue | idem (`Interrupted`) | « Nous n'avons pas encore pu confirmer… », « Réessayer le paiement », « Vérifier le statut de ma commande ». |
-| Confirmation | `src/app/confirmation/[orderId].tsx` | Animation de validation, référence, produit, quantité, total payé, statut « Payée ». |
+| Confirmation | `src/app/confirmation/[orderId].tsx` | Animation de validation, référence, articles et quantités, total payé, statut « Payée ». |
 | Suivi et « Mes commandes » | `src/app/orders/[id].tsx`, `src/app/(tabs)/commandes.tsx` | Statut réel du serveur (« En attente » ou « Payée ») et bouton d'actualisation. Pas de faux suivi de livraison. |
 
 ### Design System (`src/theme`, `src/ui`)
@@ -278,7 +284,13 @@ Expo SDK 58, Expo Router, TypeScript strict, TanStack Query, Reanimated et Manro
 
 ### Bonus : l'essayage en direct
 
-Le bouton « Lancer l'essayage » ouvre la page `/essayage` de l'API dans le navigateur du téléphone (caméra frontale + IA). C'est la solution qui fonctionne dans Expo Go sans module natif. La fonctionnalité est **facultative et isolée** (`server/src/tryon`) :
+L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, grâce à une WebView (`react-native-webview`, inclus dans Expo Go). Rien ne s'ouvre dans une autre fenêtre :
+
+- en arrivant sur l'onglet, l'app demande l'accès à la caméra (fenêtre du système, une seule fois), puis l'essayage **démarre tout seul** ;
+- la page informe l'app de son état (préparation, en direct, terminé, erreur) ; l'app affiche son propre badge et un bouton « Relancer l'essayage » ;
+- la caméra s'arrête dès qu'on quitte l'onglet ou que l'app passe en arrière-plan.
+
+La fonctionnalité est **facultative et isolée** (`server/src/tryon`) :
 
 - **Mode Decart** (`DECART_API_KEY`) : modèle temps réel `lucy-vton` via WebRTC. La clé reste sur le serveur. Le navigateur ne reçoit qu'un jeton de 60 secondes, limité au modèle, à l'origine de la page et à des séances de 45 secondes.
 - **Mode AnyWear** (`ANYWEAR_DOMAIN`) : charge le widget officiel AnyWear de Decart, une fois le domaine activé par Decart.
@@ -295,7 +307,8 @@ Le bouton « Lancer l'essayage » ouvre la page `/essayage` de l'API dans le nav
 - **La logique de paiement de l'app est indépendante de React** (`paymentController.ts`). On peut ainsi la tester sans téléphone, avec un faux serveur qui applique les mêmes règles.
 - **TanStack Query plutôt qu'un store global** : le serveur reste la source de vérité, les écrans partagent un cache, et les écritures ne sont jamais rejouées automatiquement.
 - **Tests serveur contre un vrai PostgreSQL** (`embedded-postgres`) : les verrous et la concurrence ne se simulent pas de façon fiable.
-- **Commande d'un seul produit**, comme demandé. Les maquettes montraient un panier de plusieurs produits ; je ne l'ai pas ajouté pour ne pas modifier le modèle de données sans raison.
+- **Le panier s'ajoute au parcours du sujet sans le remplacer.** « Commander » sur la fiche produit mène toujours à l'écran quantité → total → « Payer » demandé. Côté serveur, les lignes vivent dans `order_items` (migration `003`, les anciennes commandes sont reprises) et `POST /orders` accepte toujours `{ productId, quantity }`. Le paiement d'un panier garde exactement les mêmes garanties : une transaction, tout ou rien.
+- **Le panier vit sur le téléphone**, sans compte client : il ne contient que des identifiants et des quantités. Tant que son contenu ne change pas, il renvoie la même clé d'idempotence : appuyer deux fois sur « Commander » ne crée qu'une commande.
 - **Render gratuit et Docker** : le même conteneur tourne en local, en CI et en production.
 
 ---
@@ -313,7 +326,7 @@ Le bouton « Lancer l'essayage » ouvre la page `/essayage` de l'API dans le nav
 | **Abus ou déni de service.** | Limite globale de 300 requêtes par 15 minutes et par IP. Corps JSON de 10 ko maximum. Requêtes SQL coupées après 10 secondes. | Pare-feu applicatif ou CDN. |
 | **Fuite d'informations.** | Erreurs 500 génériques. `X-Powered-By` désactivé. En-têtes `helmet`. Certificat TLS de la base vérifié. | Journalisation centralisée. |
 | **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé Decart ne part jamais vers le navigateur. Le téléphone ne stocke que des identifiants (aucune donnée personnelle). | Rotation des clés. |
-| **Script tiers (widget AnyWear).** | Autorisé uniquement sur `/essayage`, avec une politique de sécurité (CSP) dédiée. La caméra est limitée à cette page, et rien ne part sans le consentement explicite du client. | Figer une version du widget. |
+| **Script tiers (widget AnyWear).** | Autorisé uniquement sur `/essayage`, avec une politique de sécurité (CSP) dédiée. La caméra est limitée à cette page et à l'onglet Essayage, demande l'autorisation du système, et s'arrête dès qu'on quitte l'onglet. Aucune image n'est enregistrée par Ziko Shop. | Figer une version du widget. |
 | **CORS ouvert (`*`).** | Acceptable : ni cookie ni session, et l'app mobile n'est pas soumise à CORS. Configurable via `CORS_ORIGINS`. | Restreindre si un site web est ajouté. |
 
 ---
@@ -322,8 +335,8 @@ Le bouton « Lancer l'essayage » ouvre la page `/essayage` de l'API dans le nav
 
 - **Un vrai paiement Mobile Money** (M-Pesa, Orange Money, Airtel Money, via un agrégateur), confirmé par un webhook signé, avec un statut « en cours ».
 - **Réserver le stock** quelques minutes à la création de la commande.
-- Comptes clients, historique synchronisé entre appareils, panier de plusieurs produits et tailles (le modèle de données n'en a pas aujourd'hui).
-- Un essayage IA intégré dans l'app (build de développement avec WebRTC natif) au lieu du navigateur.
+- Comptes clients, historique et panier synchronisés entre appareils, gestion des tailles.
+- Un essayage natif (build de développement avec WebRTC natif) pour ne plus dépendre d'une page web dans l'app.
 - Tests de bout en bout sur téléphone (Maestro), documentation OpenAPI, suivi des erreurs (Sentry).
 - Un hébergement payant (pas de mise en veille) et un CDN pour les images.
 
@@ -337,7 +350,8 @@ Durée : 3 à 4 minutes. On filme l'écran du téléphone, avec Expo Go et l'app
 2. **0:20 – Catalogue et fiche** (40 s) :
    - ouvrir « L'Essentiel » et changer de couleur : la photo, le prix et le stock changent ;
    - montrer un produit presque épuisé (badge orange) ;
-   - montrer l'onglet Essayage : modèle, couleur et consentement.
+   - montrer l'onglet Essayage : la caméra s'ouvre dans l'app, changer de couleur, « Ajouter au panier » ;
+   - montrer le panier : deux pulls, une quantité modifiée, « Essayer » depuis une ligne.
 3. **1:00 – Commande** (30 s) : « Commander », passer la quantité à 2 (le total se met à jour), puis « Continuer vers le paiement ». Montrer la référence ZK-… et le statut « En attente ».
 4. **1:30 – Paiement normal** (20 s) : « Payer ». Montrer l'animation de confirmation, « Payée », puis « Voir ma commande » et « Actualiser le statut ».
 5. **1:50 – Le réseau coupe** (60 s) :
@@ -379,7 +393,7 @@ server/                     API Node.js + Express + TypeScript
     orders/                 commandes et paiement (orders.service.ts : le cœur)
     http/                   erreurs, middlewares, validation
     tryon/                  essayage en direct (facultatif)
-  test/                     46 tests (Vitest + Supertest + vrai PostgreSQL)
+  test/                     61 tests (Vitest + Supertest + vrai PostgreSQL)
   web/essayage/             script de la page d'essayage (compilé par esbuild)
   public/                   photos des pulls, page /essayage
 mobile/                     app Expo (React Native + TypeScript)
@@ -387,6 +401,7 @@ mobile/                     app Expo (React Native + TypeScript)
   src/ui/                   Design System : composants réutilisables
   src/theme/                jetons : couleurs, typographie, espacements, animations
   src/lib/payment/          contrôleur de paiement idempotent + tests
+  src/lib/cart/             règles du panier + tests, panier partagé entre les écrans
   src/lib/                  synchronisation (TanStack Query), stockage, formatage « 35 000 FC »
   src/api/                  client HTTP typé et gestion des erreurs réseau
 docs/                       direction artistique, logo, captures d'écran
