@@ -30,7 +30,15 @@ export function stockLabel(stock: number): string {
   return `${stock} en stock`;
 }
 
-/** Numéro de commande court et lisible : les 8 premiers caractères de l'identifiant. */
-export function shortOrderNumber(orderId: string): string {
-  return orderId.slice(0, 8).toUpperCase();
+/** Référence de commande lisible : « ZK-249CBEF4 » (les 8 premiers caractères de l'identifiant). */
+export function orderReference(orderId: string): string {
+  return `ZK-${orderId.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+}
+
+/** Date courte en français : « 26 nov. 2026, 14:32 ». */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  const months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
