@@ -39,6 +39,11 @@ describe("Santé et fonctionnalités", () => {
     expect(res.body.error.code).toBe("FEATURE_DISABLED");
   });
 
+  it("GET /try-on/config indique que l'essayage est désactivé", async () => {
+    const res = await request(server).get("/try-on/config");
+    expect(res.body.mode).toBe("off");
+  });
+
   it("une route inconnue renvoie une erreur JSON 404", async () => {
     const res = await request(server).get("/nexiste-pas");
     expect(res.status).toBe(404);

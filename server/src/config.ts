@@ -30,6 +30,14 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().default("*"),
   /** Clé de l'API temps réel Decart pour l'essayage en direct (facultative). */
   DECART_API_KEY: z.string().default(""),
+  /**
+   * Autre option d'essayage : le widget AnyWear de Decart, activé pour ce
+   * domaine sur anywear.decart.ai/install (ex. ziko-shop-api.onrender.com).
+   */
+  ANYWEAR_DOMAIN: z
+    .string()
+    .regex(/^$|^[a-z0-9.-]+\.[a-z]{2,}$/i, "ANYWEAR_DOMAIN doit être un nom de domaine, sans https://")
+    .default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);

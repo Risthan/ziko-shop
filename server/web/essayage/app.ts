@@ -193,17 +193,38 @@ function stop() {
   startButton.disabled = false;
 }
 
+type TryOnConfig = { mode: "decart"; maxSessionSeconds: number } | { mode: "anywear"; widgetUrl: string } | { mode: "off" };
+
+/**
+ * Mode widget AnyWear : on affiche simplement la photo du pull choisi et on
+ * charge le script officiel, qui détecte la photo et y ajoute son bouton.
+ */
+function useAnywearWidget(widgetUrl: string) {
+  startButton.hidden = true;
+  garment.hidden = false;
+  overlayText.textContent = "Touchez le bouton « Try-On » sur la photo pour vous voir porter ce pull.";
+  const script = document.createElement("script");
+  script.src = widgetUrl;
+  script.async = true;
+  script.onerror = () => say("Le widget d'essayage n'a pas pu se charger.", true);
+  document.body.append(script);
+}
+
 async function init() {
   const productId = new URLSearchParams(location.search).get("produit");
   try {
-    const response = await fetch("/products");
-    if (!response.ok) throw new Error();
-    const { products } = (await response.json()) as { products: Product[] };
+    const [productsResponse, configResponse] = await Promise.all([fetch("/products"), fetch("/try-on/config")]);
+    if (!productsResponse.ok || !configResponse.ok) throw new Error();
+    const { products } = (await productsResponse.json()) as { products: Product[] };
+    const config = (await configResponse.json()) as TryOnConfig;
     const product = products.find((item) => item.id === productId) ?? products[0];
     if (!product) throw new Error();
     const variants = products.filter((item) => split(item.name).model === split(product.name).model);
     showProduct(product, variants);
-    startButton.disabled = false;
+
+    if (config.mode === "anywear") useAnywearWidget(config.widgetUrl);
+    else if (config.mode === "decart") startButton.disabled = false;
+    else say("L'essayage en direct n'est pas encore activé sur cette boutique.");
   } catch {
     productLine.textContent = "Produit introuvable.";
     say("Impossible de charger le produit. Revenez à l'app et réessayez.", true);
