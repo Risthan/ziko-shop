@@ -36,6 +36,9 @@ export interface Features {
   liveTryOn: boolean;
 }
 
+/** Mode d'essayage configuré sur le serveur : API Decart, widget AnyWear, ou désactivé. */
+export type TryOnConfig = { mode: "decart"; maxSessionSeconds: number } | { mode: "anywear"; widgetUrl: string } | { mode: "off" };
+
 export type ApiErrorCode =
   | "VALIDATION_ERROR"
   | "PRODUCT_NOT_FOUND"

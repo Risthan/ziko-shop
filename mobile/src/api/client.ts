@@ -1,5 +1,5 @@
 import { API_URL } from "@/config";
-import type { ApiErrorCode, Features, Order, PayOrderResponse, Product } from "./types";
+import type { ApiErrorCode, Features, Order, PayOrderResponse, Product, TryOnConfig } from "./types";
 
 /**
  * Trois familles d'échec, qui ne se traitent pas de la même façon :
@@ -84,6 +84,8 @@ export const api = {
   getProduct: (id: string) => request<{ product: Product }>(`/products/${id}`).then((r) => r.product),
 
   getFeatures: () => request<Features>("/features"),
+
+  getTryOnConfig: () => request<TryOnConfig>("/try-on/config"),
 
   /** La clé d'idempotence évite de créer deux commandes si la requête est renvoyée. */
   createOrder: (productId: string, quantity: number, idempotencyKey: string) =>
