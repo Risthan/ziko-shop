@@ -1,0 +1,27 @@
+# Dépendances et builds
+node_modules/
+dist/
+.expo/
+web-build/
+*.tsbuildinfo
+
+# Secrets et configuration locale
+.env
+.env.*
+!.env.example
+
+# Base PostgreSQL locale (scripts/local-db.ts) et fichiers temporaires
+.pgdata/
+.pgtest-*/
+*.log
+.DS_Store
+Thumbs.db
+
+# Expo / natif
+ios/
+android/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
