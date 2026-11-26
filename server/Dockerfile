@@ -6,6 +6,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
+COPY web ./web
+COPY public ./public
+# Compile l'API (dist/) et le script de la page d'essayage (public/essayage/app.js).
 RUN npm run build
 
 # --- Étape 2 : image finale, uniquement le nécessaire pour tourner ---
@@ -15,7 +18,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=build /app/dist ./dist
-COPY public ./public
+COPY --from=build /app/public ./public
 # Ne pas tourner en root dans le conteneur.
 USER node
 EXPOSE 3000

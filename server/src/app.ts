@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import compression from "compression";
 import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
@@ -9,6 +10,7 @@ import type { Db } from "./db/pool.js";
 import { errorHandler, notFoundHandler, requestLogger } from "./http/middleware.js";
 import { ordersRouter } from "./orders/orders.routes.js";
 import { productsRouter } from "./products/products.routes.js";
+import { tryOnRouter } from "./tryon/tryon.routes.js";
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 
@@ -29,6 +31,8 @@ export function createApp(db: Db, config: AppConfig): express.Express {
       origin: config.CORS_ORIGINS === "*" ? "*" : config.CORS_ORIGINS.split(",").map((origin) => origin.trim()),
     }),
   );
+  // Réponses compressées (gzip) : moins de données sur les réseaux mobiles.
+  app.use(compression());
   app.use(express.json({ limit: "10kb" }));
   if (config.NODE_ENV !== "test") app.use(requestLogger);
 
@@ -63,6 +67,8 @@ export function createApp(db: Db, config: AppConfig): express.Express {
 
   app.use("/products", productsRouter(db, config.ADMIN_API_KEY));
   app.use("/orders", ordersRouter(db));
+  // Facultatif et isolé : essayage en direct (voir src/tryon).
+  app.use(tryOnRouter(config.DECART_API_KEY));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

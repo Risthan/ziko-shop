@@ -25,3 +25,4 @@ android/
 *.p12
 *.key
 *.mobileprovision
+server/public/essayage/app.js
