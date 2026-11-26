@@ -1,0 +1,15 @@
+# L'hébergement gratuit de Render met l'API en veille après 15 minutes
+# sans visite ; le premier appel prend alors jusqu'à une minute. Ce petit
+# ping toutes les 10 minutes la garde éveillée pendant l'évaluation.
+name: Garder l'API éveillée
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl --fail --silent --show-error --max-time 90 https://ziko-shop-api.onrender.com/health
