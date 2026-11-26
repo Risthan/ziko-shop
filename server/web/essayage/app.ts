@@ -36,6 +36,22 @@ let session: RealTimeClient | null = null;
 let camera: MediaStream | null = null;
 let countdown: number | undefined;
 
+/**
+ * Mode « intégré » (?embed=1) : la page est affichée DANS l'app mobile
+ * (WebView). Plein écran, lancement automatique, et l'app est informée de
+ * l'état de la séance pour afficher ses propres indicateurs.
+ */
+const embedded = new URLSearchParams(location.search).get("embed") === "1";
+if (embedded) document.body.classList.add("embed");
+
+type TryOnStatus = "loading" | "ready" | "live" | "ended" | "error";
+function notify(status: TryOnStatus, message?: string) {
+  const payload = JSON.stringify({ source: "ziko-tryon", status, message });
+  const bridge = (window as unknown as { ReactNativeWebView?: { postMessage(data: string): void } }).ReactNativeWebView;
+  if (bridge) bridge.postMessage(payload);
+  else if (window.parent !== window) window.parent.postMessage(payload, "*");
+}
+
 const normalize = (text: string) =>
   text
     .normalize("NFD")
@@ -51,6 +67,7 @@ function split(name: string) {
 function say(text: string, isError = false) {
   message.textContent = text;
   message.classList.toggle("error", isError);
+  if (isError) notify("error", text);
 }
 
 /** Consigne courte (20-30 mots) recommandée par Decart pour le modèle d'essayage. */
@@ -147,6 +164,7 @@ async function start() {
         overlay.hidden = true;
         live.hidden = false;
         say("");
+        notify("live");
       },
     });
     session.on("error", () => say("La connexion au service d'essayage a été interrompue.", true));
@@ -172,6 +190,7 @@ function startCountdown(seconds: number) {
     if (left <= 0) {
       stop();
       say("Séance terminée. Vous pouvez relancer un essayage.");
+      notify("ended");
     }
   }, 1000);
 }
@@ -202,12 +221,36 @@ type TryOnConfig = { mode: "decart"; maxSessionSeconds: number } | { mode: "anyw
 function useAnywearWidget(widgetUrl: string) {
   startButton.hidden = true;
   garment.hidden = false;
-  overlayText.textContent = "Touchez « Try-On » en haut de la photo, puis autorisez la caméra pour vous voir porter ce pull.";
+  overlayText.textContent = embedded
+    ? "Préparation de l'essayage…"
+    : "Touchez « Try-On » en haut de la photo, puis autorisez la caméra pour vous voir porter ce pull.";
   const script = document.createElement("script");
   script.src = widgetUrl;
   script.async = true;
-  script.onerror = () => say("Le widget d'essayage n'a pas pu se charger.", true);
+  script.onerror = () => say("Le service d'essayage n'a pas pu se charger.", true);
   document.body.append(script);
+  if (embedded) autoOpenWidget();
+}
+
+/**
+ * Dans l'app, on ouvre directement la cabine d'essayage du widget : le
+ * client n'a rien à toucher. Le widget place son bouton « Try-On » sur la
+ * photo du pull ; on l'active dès qu'il apparaît.
+ */
+function autoOpenWidget() {
+  const startedAt = Date.now();
+  const timer = window.setInterval(() => {
+    const button = document.querySelector<HTMLElement>(".vton-btn");
+    if (button) {
+      window.clearInterval(timer);
+      button.click();
+      overlay.hidden = true;
+      notify("live");
+    } else if (Date.now() - startedAt > 20_000) {
+      window.clearInterval(timer);
+      say("Le service d'essayage ne répond pas pour le moment.", true);
+    }
+  }, 300);
 }
 
 async function init() {
@@ -222,9 +265,12 @@ async function init() {
     const variants = products.filter((item) => split(item.name).model === split(product.name).model);
     showProduct(product, variants);
 
+    notify("ready");
     if (config.mode === "anywear") useAnywearWidget(config.widgetUrl);
-    else if (config.mode === "decart") startButton.disabled = false;
-    else say("L'essayage en direct n'est pas encore activé sur cette boutique.");
+    else if (config.mode === "decart") {
+      startButton.disabled = false;
+      if (embedded) void start(); // dans l'app : lancement automatique
+    } else say("L'essayage en direct n'est pas encore activé sur cette boutique.", true);
   } catch {
     productLine.textContent = "Produit introuvable.";
     say("Impossible de charger le produit. Revenez à l'app et réessayez.", true);

@@ -217,3 +217,42 @@ h1 {
   line-height: 1.5;
   margin: 4px 0 0;
 }
+
+/* --- Mode intégré dans l'app (?embed=1) : plein écran, sans en-tête ni boutons --- */
+body.embed {
+  background: var(--surface);
+  min-height: 0;
+  overflow: hidden;
+}
+body.embed .page {
+  max-width: none;
+  padding: 0;
+  gap: 0;
+}
+body.embed .brand,
+body.embed h1,
+body.embed .lead,
+body.embed .swatches,
+body.embed .actions,
+body.embed .fineprint {
+  display: none;
+}
+body.embed .stage {
+  aspect-ratio: auto;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+}
+body.embed .message {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(5, 8, 10, 0.82);
+  border: 1px solid var(--border);
+}
+body.embed .message:empty {
+  display: none;
+}
