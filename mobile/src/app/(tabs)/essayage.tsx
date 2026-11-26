@@ -1,9 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { router, useLocalSearchParams } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
-import { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import Animated, { FadeIn } from "react-native-reanimated";
+import { useCameraPermissions } from "expo-camera";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AppState, Linking, Platform, ScrollView, StyleSheet, View } from "react-native";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { API_URL } from "@/config";
 import { groupByModel, modelCopy } from "@/lib/catalog";
 import { formatCdf, normalize, splitProductName } from "@/lib/format";
@@ -11,37 +11,66 @@ import { haptics } from "@/lib/haptics";
 import { useProducts, useTryOnConfig } from "@/lib/queries";
 import { colors, motion, radius, spacing } from "@/theme";
 import { AppText } from "@/ui/AppText";
-import { Badge, StockBadge } from "@/ui/Badges";
+import { StockBadge } from "@/ui/Badges";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { ColorSwatches } from "@/ui/ColorSwatches";
 import { Header } from "@/ui/Header";
 import { IconButton } from "@/ui/IconButton";
-import { Notice } from "@/ui/Notice";
 import { PressableScale } from "@/ui/PressableScale";
 import { ProductImage } from "@/ui/ProductImage";
 import { Screen } from "@/ui/Screen";
 import { Sheet } from "@/ui/Sheet";
 import { LoadingState } from "@/ui/States";
+import { TryOnView, type TryOnStatus } from "@/ui/TryOnView";
 
 /**
- * Écran 03 — Essayage virtuel en direct.
- * Le flux vidéo (caméra + IA) s'ouvre dans le navigateur du téléphone : c'est
- * ce qui fonctionne dans Expo Go sur iPhone et Android, sans module natif.
- * Ici, on choisit le pull, on donne son accord, et on peut toujours commander.
+ * Écran 03 — Essayage virtuel en direct, DANS l'app.
+ * La séance démarre toute seule dès que l'onglet est ouvert : la caméra
+ * s'affiche dans le cadre ci-dessous, sans quitter l'app ni rien confirmer.
+ * Changer de modèle ou de couleur relance l'essayage avec le nouveau pull.
+ * L'achat reste toujours possible, même si le service d'essayage est indisponible.
  */
 export default function TryOnScreen() {
   const { produit } = useLocalSearchParams<{ produit?: string }>();
   const products = useProducts();
   const config = useTryOnConfig();
+  const [permission, requestPermission] = useCameraPermissions();
   const [pickedId, setPickedId] = useState<string | null>(null);
-  const [consent, setConsent] = useState(false);
-  const [sessionDone, setSessionDone] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [active, setActive] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+  const [status, setStatus] = useState<{ value: TryOnStatus; message?: string }>({ value: "loading" });
+
+  // La caméra ne tourne que lorsque l'onglet est affiché et l'app au premier plan.
+  useFocusEffect(
+    useCallback(() => {
+      setActive(true);
+      return () => setActive(false);
+    }, []),
+  );
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => setActive(state === "active"));
+    return () => sub.remove();
+  }, []);
+
+  // Demande d'accès à la caméra dès l'arrivée sur l'onglet (fenêtre du système, une seule fois).
+  const needsPermission = Platform.OS !== "web";
+  useEffect(() => {
+    if (needsPermission && permission && !permission.granted && permission.canAskAgain) void requestPermission();
+  }, [needsPermission, permission, requestPermission]);
+
+  const onStatus = useCallback((value: TryOnStatus, message?: string) => {
+    setStatus({ value, message });
+    if (value === "live") haptics.success();
+  }, []);
 
   const all = products.data ?? [];
   const groups = useMemo(() => groupByModel(all), [all]);
   const selected = all.find((p) => p.id === (pickedId ?? produit)) ?? all.find((p) => p.stock > 0) ?? all[0];
+
+  // Nouveau pull ou nouvel essai : la séance repart de zéro.
+  useEffect(() => setStatus({ value: "loading" }), [selected?.id, attempt]);
 
   if (!selected) {
     return (
@@ -56,77 +85,112 @@ export default function TryOnScreen() {
   const variants = groups.find((group) => group.model === model)?.variants ?? [selected];
   const mode = config.data?.mode;
   const available = mode === "decart" || mode === "anywear";
+  const cameraAllowed = !needsPermission || permission?.granted === true;
 
+  const pick = (id: string) => {
+    haptics.select();
+    setPickedId(id);
+  };
   const pickModel = (target: string) => {
     const group = groups.find((g) => g.model === target);
     const sameColor = group?.variants.find((v) => normalize(splitProductName(v.name).color ?? "") === normalize(color ?? ""));
     const next = sameColor ?? group?.variants[0];
-    if (next) {
-      haptics.select();
-      setPickedId(next.id);
-      setSessionDone(false);
-    }
+    if (next) pick(next.id);
+  };
+  const retry = () => {
+    haptics.tap();
+    setAttempt((n) => n + 1);
   };
 
-  const start = async () => {
-    setSessionDone(false);
-    await WebBrowser.openBrowserAsync(`${API_URL}/essayage?produit=${selected.id}`, {
-      presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
-      controlsColor: colors.accent,
-      toolbarColor: colors.background,
-    });
-    setSessionDone(true);
+  const renderStage = () => {
+    if (config.isPending || !permission) return <LoadingState message="Préparation de l'essayage…" />;
+
+    if (!available) {
+      return (
+        <StageMessage
+          image={selected.imageUrl}
+          name={selected.name}
+          icon="pause-circle-outline"
+          title="Essayage indisponible pour le moment"
+          message={
+            config.isError
+              ? "Impossible de joindre le service d'essayage. Vous pouvez quand même commander ce pull."
+              : "Le service d'essayage n'est pas activé. Vous pouvez quand même commander ce pull."
+          }
+        />
+      );
+    }
+
+    if (!cameraAllowed) {
+      return (
+        <StageMessage
+          image={selected.imageUrl}
+          name={selected.name}
+          icon="videocam-off-outline"
+          title="Accès à la caméra nécessaire"
+          message="Autorisez la caméra pour vous voir porter ce pull en direct."
+          action={
+            permission.canAskAgain ? (
+              <Button title="Autoriser la caméra" icon="videocam-outline" size="md" onPress={() => void requestPermission()} />
+            ) : (
+              <Button title="Ouvrir les réglages" icon="settings-outline" size="md" variant="secondary" onPress={() => void Linking.openSettings()} />
+            )
+          }
+        />
+      );
+    }
+
+    if (!active) return <StageMessage image={selected.imageUrl} name={selected.name} icon="pause-outline" title="Essayage en pause" message="Il reprend dès que vous revenez." />;
+
+    return (
+      <>
+        <TryOnView key={`${selected.id}-${attempt}`} url={`${API_URL}/essayage?produit=${selected.id}&embed=1`} onStatus={onStatus} />
+        <StatusChip status={status.value} />
+        {status.value === "ended" || status.value === "error" ? (
+          <Animated.View entering={FadeIn.duration(motion.base)} exiting={FadeOut.duration(motion.fast)} style={styles.endCard}>
+            <AppText variant="bodyStrong" center>
+              {status.value === "ended" ? "Séance terminée" : "L'essayage s'est interrompu"}
+            </AppText>
+            <AppText variant="small" center>
+              {status.value === "ended" ? "Ce pull vous plaît ? Commandez-le ci-dessous." : (status.message ?? "Le service d'essayage ne répond pas pour le moment.")}
+            </AppText>
+            <Button title="Relancer l'essayage" icon="refresh" size="md" variant="secondary" onPress={retry} />
+          </Animated.View>
+        ) : null}
+      </>
+    );
   };
 
   return (
     <Screen>
       <Header right={<IconButton icon="help-circle-outline" label="Comment ça marche ?" onPress={() => setHelpOpen(true)} />} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.titleRow}>
+        <View style={styles.title}>
           <AppText variant="h1">Essayage en direct</AppText>
+          <AppText variant="body">Placez-vous face à la caméra : vous portez le pull en temps réel.</AppText>
         </View>
-        <AppText variant="body" style={styles.subtitle}>
-          Voyez-vous porter le pull en temps réel, avec la caméra de votre téléphone.
+
+        <View style={styles.stage}>{renderStage()}</View>
+        <AppText variant="caption" center style={styles.privacy}>
+          L'image de la caméra sert uniquement pendant la séance. Ziko Shop n'enregistre aucune image.
         </AppText>
 
-        {/* Aperçu du vêtement choisi (photo produit, PAS un flux vidéo) */}
-        <View style={styles.preview}>
-          <ProductImage path={selected.imageUrl} name={selected.name} style={styles.previewImage} />
-          <View style={[styles.corner, styles.cornerTL]} />
-          <View style={[styles.corner, styles.cornerTR]} />
-          <View style={styles.previewTag}>
-            <Ionicons name="shirt-outline" size={14} color={colors.text} />
-            <AppText variant="caption" color={colors.text}>
-              Aperçu du vêtement
-            </AppText>
-          </View>
-          <View style={styles.serviceTag}>
-            {config.isPending ? (
-              <Badge label="Vérification…" tone="neutral" size="sm" />
-            ) : available ? (
-              <Badge label="Service disponible" tone="accent" icon="radio-button-on" size="sm" />
-            ) : (
-              <Badge label="Service indisponible" tone="warning" icon="pause-circle-outline" size="sm" />
-            )}
-          </View>
-        </View>
-
-        {/* Choix du modèle */}
+        {/* Choix du modèle : l'essayage se relance avec le pull choisi. */}
         <View style={styles.models}>
           {groups.map((group) => {
-            const active = group.model === model;
+            const isActive = group.model === model;
             const cover = group.variants.find((v) => normalize(splitProductName(v.name).color ?? "") === normalize(color ?? "")) ?? group.variants[0];
             return (
               <PressableScale
                 key={group.model}
                 onPress={() => pickModel(group.model)}
-                style={[styles.modelCard, active && styles.modelActive]}
+                style={[styles.modelCard, isActive && styles.modelActive]}
                 accessibilityRole="button"
-                accessibilityState={{ selected: active }}
+                accessibilityState={{ selected: isActive }}
                 accessibilityLabel={`Essayer ${group.model}`}
               >
                 {cover ? <ProductImage path={cover.imageUrl} name={group.model} style={styles.modelImage} /> : null}
-                {active ? (
+                {isActive ? (
                   <View style={styles.check}>
                     <Ionicons name="checkmark" size={12} color={colors.onAccent} />
                   </View>
@@ -154,53 +218,15 @@ export default function TryOnScreen() {
                 size={30}
                 options={variants.map((v) => ({ id: v.id, color: splitProductName(v.name).color ?? "", disabled: v.stock <= 0 }))}
                 selectedId={selected.id}
-                onSelect={(variantId) => {
-                  setPickedId(variantId);
-                  setSessionDone(false);
-                }}
+                onSelect={pick}
               />
             </View>
           ) : null}
         </Card>
 
-        {sessionDone ? <Notice tone="info" title="Séance terminée" message="Ce pull vous plaît ? Vous pouvez le commander directement." /> : null}
-
-        {available ? (
-          <>
-            <PressableScale
-              haptic
-              onPress={() => setConsent((value) => !value)}
-              style={styles.consent}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: consent }}
-            >
-              <View style={[styles.checkbox, consent && styles.checkboxOn]}>
-                {consent ? <Ionicons name="checkmark" size={14} color={colors.onAccent} /> : null}
-              </View>
-              <AppText variant="small" style={{ flex: 1 }}>
-                J'accepte que l'image de ma caméra soit transmise au service d'essayage (Decart) pendant la séance, 45 secondes au maximum. Ziko Shop n'enregistre aucune image.
-              </AppText>
-            </PressableScale>
-            <Button title="Lancer l'essayage" icon="videocam-outline" disabled={!consent} onPress={() => void start()} />
-          </>
-        ) : !config.isPending ? (
-          <Animated.View entering={FadeIn.duration(motion.base)}>
-            <Notice
-              tone="warning"
-              title="Essayage indisponible pour le moment"
-              message={
-                config.isError
-                  ? "Impossible de joindre le service d'essayage. Vous pouvez quand même commander ce pull."
-                  : "Le service d'essayage n'est pas activé sur ce serveur. Vous pouvez quand même commander ce pull."
-              }
-            />
-          </Animated.View>
-        ) : null}
-
-        {/* L'achat n'est JAMAIS bloqué par le service d'IA. */}
+        {/* L'achat n'est JAMAIS bloqué par le service d'essayage. */}
         <Button
           title={selected.stock > 0 ? `Commander ce pull · ${formatCdf(selected.priceCdf)}` : "Produit épuisé"}
-          variant={available ? "secondary" : "primary"}
           icon="bag-handle-outline"
           disabled={selected.stock <= 0}
           onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: selected.id } })}
@@ -213,7 +239,7 @@ export default function TryOnScreen() {
         icon="scan-outline"
         tone="accent"
         title="Comment ça marche ?"
-        message="Choisissez un modèle et une couleur, puis lancez l'essayage. Sur la page qui s'ouvre, touchez « Try-On » en haut de la photo et autorisez la caméra : vous vous voyez porter le pull en direct. Fermez la page pour revenir ici et commander."
+        message="L'essayage démarre tout seul dans le cadre. Placez-vous face à la caméra, le haut du corps bien visible, et reculez d'un pas si besoin. Touchez un autre modèle ou une autre couleur : le pull change aussitôt. Il vous plaît ? Commandez-le juste en dessous."
       >
         <Button title="J'ai compris" onPress={() => setHelpOpen(false)} />
       </Sheet>
@@ -221,21 +247,67 @@ export default function TryOnScreen() {
   );
 }
 
-const CORNER = 26;
+const STATUS_LABEL: Record<TryOnStatus, string> = {
+  loading: "Préparation…",
+  ready: "Connexion à la caméra…",
+  live: "En direct",
+  ended: "Séance terminée",
+  error: "Interrompu",
+};
+
+function StatusChip({ status }: { status: TryOnStatus }) {
+  const live = status === "live";
+  return (
+    <View pointerEvents="none" style={styles.chip}>
+      <View style={[styles.dot, { backgroundColor: live ? colors.accent : status === "error" ? colors.danger : colors.textSecondary }]} />
+      <AppText variant="caption" color={colors.text}>
+        {STATUS_LABEL[status]}
+      </AppText>
+    </View>
+  );
+}
+
+function StageMessage(props: { image: string | null; name: string; icon: keyof typeof Ionicons.glyphMap; title: string; message: string; action?: React.ReactNode }) {
+  return (
+    <Animated.View entering={FadeIn.duration(motion.base)} style={styles.fill}>
+      <ProductImage path={props.image} name={props.name} style={styles.stageImage} />
+      <View style={styles.endCard}>
+        <Ionicons name={props.icon} size={26} color={colors.accent} />
+        <AppText variant="bodyStrong" center>
+          {props.title}
+        </AppText>
+        <AppText variant="small" center>
+          {props.message}
+        </AppText>
+        {props.action}
+      </View>
+    </Animated.View>
+  );
+}
+
+const CORNER = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 } as const;
 
 const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.lg, maxWidth: 640, width: "100%", alignSelf: "center" },
-  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexWrap: "wrap" },
-  subtitle: { marginTop: -spacing.sm },
-  preview: { borderRadius: radius.xl, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-  previewImage: { width: "100%", aspectRatio: 4 / 4.2, borderRadius: 0 },
-  corner: { position: "absolute", width: CORNER, height: CORNER, borderColor: colors.accent, opacity: 0.8 },
-  cornerTL: { top: 56, left: "22%", borderTopWidth: 2, borderLeftWidth: 2, borderTopLeftRadius: 8 },
-  cornerTR: { top: 56, right: "22%", borderTopWidth: 2, borderRightWidth: 2, borderTopRightRadius: 8 },
-  previewTag: {
+  title: { gap: spacing.xs },
+  stage: {
+    width: "100%",
+    aspectRatio: 3 / 4,
+    maxHeight: 560,
+    borderRadius: radius.xl,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    justifyContent: "center",
+  },
+  privacy: { marginTop: -spacing.sm, color: colors.textTertiary },
+  fill: { ...CORNER },
+  stageImage: { ...CORNER, width: "100%", height: "100%", borderRadius: 0 },
+  chip: {
     position: "absolute",
+    top: spacing.md,
     left: spacing.md,
-    bottom: spacing.md,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -244,7 +316,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  serviceTag: { position: "absolute", left: spacing.md, top: spacing.md },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  endCard: {
+    position: "absolute",
+    left: spacing.md,
+    right: spacing.md,
+    bottom: spacing.md,
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.overlay,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
   models: { flexDirection: "row", gap: spacing.sm },
   modelCard: { flex: 1, borderRadius: radius.lg, borderWidth: 1.5, borderColor: colors.border, padding: 3, backgroundColor: colors.surface },
   modelActive: { borderColor: colors.accent },
@@ -253,7 +338,4 @@ const styles = StyleSheet.create({
   infoCard: { gap: spacing.md },
   infoRow: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start" },
   colorBlock: { gap: spacing.sm },
-  consent: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start", padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.backgroundSecondary },
-  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center", marginTop: 1 },
-  checkboxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
 });
