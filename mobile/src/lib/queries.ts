@@ -1,6 +1,7 @@
 import { QueryClient, useQueries, useQuery, useQueryClient, type QueryClient as QC } from "@tanstack/react-query";
 import { ApiError, api } from "@/api/client";
 import type { Order, Product } from "@/api/types";
+import { cart } from "./cart/useCart";
 import { orderHistory } from "./orderHistory";
 
 /**
@@ -68,11 +69,15 @@ export async function rememberOrder(client: QC, order: Order) {
   await client.invalidateQueries({ queryKey: queryKeys.myOrders });
 }
 
-/** Paiement confirmé : la commande change de statut et le stock a baissé côté serveur. */
+/**
+ * Paiement confirmé : la commande change de statut, le stock de chaque article
+ * a baissé côté serveur, et le panier se vide si c'était sa commande.
+ */
 export async function applyPaidOrder(client: QC, order: Order) {
   client.setQueryData(queryKeys.order(order.id), order);
+  cart.orderPaid(order.id);
   await Promise.all([
     client.invalidateQueries({ queryKey: queryKeys.products }),
-    client.invalidateQueries({ queryKey: queryKeys.product(order.productId) }),
+    ...order.items.map((item) => client.invalidateQueries({ queryKey: queryKeys.product(item.productId) })),
   ]);
 }

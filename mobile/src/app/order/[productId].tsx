@@ -66,7 +66,7 @@ export default function OrderScreen() {
     const key = previous && previous.quantity === safeQuantity ? previous.key : newIdempotencyKey();
     orderKey.current = { key, quantity: safeQuantity };
     try {
-      const order = await api.createOrder(current.id, safeQuantity, key);
+      const order = await api.createOrder([{ productId: current.id, quantity: safeQuantity }], key);
       await rememberOrder(client, order);
       router.push({ pathname: "/payment/[orderId]", params: { orderId: order.id } });
     } catch (error) {

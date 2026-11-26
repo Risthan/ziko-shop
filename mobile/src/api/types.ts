@@ -11,12 +11,21 @@ export interface Product {
 
 export type OrderStatus = "en_attente" | "payee";
 
-export interface Order {
-  id: string;
+export interface OrderItem {
   productId: string;
   product: { name: string; imageUrl: string | null };
   quantity: number;
+  /** Prix figé au moment de la commande. */
   unitPriceCdf: number;
+  lineTotalCdf: number;
+}
+
+export interface Order {
+  id: string;
+  /** Les articles, dans l'ordre du panier (un seul pour une commande directe). */
+  items: OrderItem[];
+  /** Nombre total de pièces. */
+  itemCount: number;
   totalCdf: number;
   status: OrderStatus;
   paymentId: string | null;

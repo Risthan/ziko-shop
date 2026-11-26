@@ -12,7 +12,7 @@ import { Button } from "@/ui/Button";
 import { Card, Divider, InfoRow } from "@/ui/Card";
 import { Header } from "@/ui/Header";
 import { IconButton } from "@/ui/IconButton";
-import { OrderLine } from "@/ui/OrderSummary";
+import { OrderLines, orderCountLabel } from "@/ui/OrderSummary";
 import { Screen } from "@/ui/Screen";
 import { EmptyState, LoadingState } from "@/ui/States";
 
@@ -81,11 +81,9 @@ export default function OrderStatusScreen() {
         </Card>
 
         <Card>
-          <OrderLine order={current} />
+          <OrderLines order={current} />
           <Divider />
-          <InfoRow label="Prix unitaire" value={formatCdf(current.unitPriceCdf)} />
-          <View style={{ height: spacing.sm }} />
-          <InfoRow label="Quantité" value={`× ${current.quantity}`} />
+          <InfoRow label="Articles" value={orderCountLabel(current)} />
           <Divider />
           <InfoRow label={paid ? "Total payé" : "Total à payer"} value={formatCdf(current.totalCdf)} strong />
           {current.paymentId ? (

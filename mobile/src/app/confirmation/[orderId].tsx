@@ -11,7 +11,7 @@ import { Button } from "@/ui/Button";
 import { Card, Divider, InfoRow } from "@/ui/Card";
 import { Header } from "@/ui/Header";
 import { Notice } from "@/ui/Notice";
-import { OrderLine } from "@/ui/OrderSummary";
+import { OrderLines } from "@/ui/OrderSummary";
 import { Screen } from "@/ui/Screen";
 import { LoadingState } from "@/ui/States";
 import { SuccessMark } from "@/ui/SuccessMark";
@@ -62,10 +62,10 @@ export default function ConfirmationScreen() {
           <Animated.View entering={FadeInDown.delay(250).duration(motion.slow)} style={styles.heroText}>
             <AppText variant="display" center>
               Commande{" "}
+              {/* Espace insécable : le « ! » ne part jamais seul à la ligne. */}
               <AppText variant="display" color={colors.accent}>
-                confirmée
-              </AppText>{" "}
-              !
+                {"confirmée !"}
+              </AppText>
             </AppText>
             <AppText variant="body" center>
               Votre paiement a bien été enregistré par le serveur.
@@ -110,7 +110,7 @@ export default function ConfirmationScreen() {
               </AppText>
             </View>
             <Divider />
-            <OrderLine order={current} />
+            <OrderLines order={current} />
             <Divider />
             <InfoRow label="Total payé" value={formatCdf(current.totalCdf)} strong />
             {current.paymentId ? (

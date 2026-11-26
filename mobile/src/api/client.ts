@@ -87,11 +87,14 @@ export const api = {
 
   getTryOnConfig: () => request<TryOnConfig>("/try-on/config"),
 
-  /** La clé d'idempotence évite de créer deux commandes si la requête est renvoyée. */
-  createOrder: (productId: string, quantity: number, idempotencyKey: string) =>
+  /**
+   * Crée une commande pour un ou plusieurs articles (le panier).
+   * La clé d'idempotence évite de créer deux commandes si la requête est renvoyée.
+   */
+  createOrder: (items: { productId: string; quantity: number }[], idempotencyKey: string) =>
     request<{ order: Order }>("/orders", {
       method: "POST",
-      body: { productId, quantity },
+      body: { items },
       headers: { "Idempotency-Key": idempotencyKey },
     }).then((r) => r.order),
 

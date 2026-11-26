@@ -26,10 +26,8 @@ const networkError = () => Object.assign(new Error("Impossible de joindre le ser
 class FakeServer {
   order: Order = {
     id: "11111111-2222-4333-8444-555555555555",
-    productId: "p1",
-    product: { name: "L'Essentiel — Noir", imageUrl: null },
-    quantity: 2,
-    unitPriceCdf: 95_000,
+    items: [{ productId: "p1", product: { name: "L'Essentiel — Noir", imageUrl: null }, quantity: 2, unitPriceCdf: 95_000, lineTotalCdf: 190_000 }],
+    itemCount: 2,
     totalCdf: 190_000,
     status: "en_attente",
     paymentId: null,

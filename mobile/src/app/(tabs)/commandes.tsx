@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
+import type { Order } from "@/api/types";
 import { formatCdf, formatDateTime, orderReference, splitProductName } from "@/lib/format";
 import { queryKeys, useMyOrders } from "@/lib/queries";
 import { colors, motion, radius, spacing } from "@/theme";
@@ -67,8 +68,17 @@ export default function OrdersScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={`Commande ${orderReference(item.id)}`}
                 >
-                  {order ? (
-                    <ProductImage path={order.product.imageUrl} name={order.product.name} style={styles.thumb} />
+                  {order?.items[0] ? (
+                    <View>
+                      <ProductImage path={order.items[0].product.imageUrl} name={order.items[0].product.name} style={styles.thumb} />
+                      {order.items.length > 1 ? (
+                        <View style={styles.more}>
+                          <AppText variant="caption" color={colors.onAccent}>
+                            +{order.items.length - 1}
+                          </AppText>
+                        </View>
+                      ) : null}
+                    </View>
                   ) : (
                     <Skeleton style={styles.thumb} />
                   )}
@@ -80,7 +90,7 @@ export default function OrdersScreen() {
                     {order ? (
                       <>
                         <AppText variant="small" numberOfLines={1}>
-                          {splitProductName(order.product.name).model} · {splitProductName(order.product.name).color} · Qté {order.quantity}
+                          {describeOrder(order)}
                         </AppText>
                         <View style={styles.bottomLine}>
                           <AppText variant="price">{formatCdf(order.totalCdf)}</AppText>
@@ -106,7 +116,32 @@ export default function OrdersScreen() {
   );
 }
 
+/** « Le Classique · Noir · Qté 2 » ou « Le Classique · Noir + 2 autres · 4 pièces ». */
+function describeOrder(order: Order): string {
+  const first = order.items[0];
+  if (!first) return "";
+  const { model, color } = splitProductName(first.product.name);
+  const name = [model, color].filter(Boolean).join(" · ");
+  if (order.items.length === 1) return `${name} · Qté ${first.quantity}`;
+  const others = order.items.length - 1;
+  return `${name} + ${others} autre${others > 1 ? "s" : ""} · ${order.itemCount} pièces`;
+}
+
 const styles = StyleSheet.create({
+  more: {
+    position: "absolute",
+    right: -6,
+    bottom: -6,
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1, maxWidth: 640, width: "100%", alignSelf: "center" },
   header: { gap: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xl },
   card: {
