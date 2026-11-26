@@ -1,156 +1,220 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
-import { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { ApiError, api } from "@/api/client";
-import type { Product } from "@/api/types";
-import { AppText } from "@/components/AppText";
-import { Button } from "@/components/Button";
-import { ProductImage } from "@/components/ProductImage";
-import { ErrorState, LoadingState } from "@/components/States";
-import { API_URL } from "@/config";
-import { formatCdf, normalize, splitProductName, stockLabel } from "@/lib/format";
-import { productStore } from "@/lib/productStore";
-import { useFeatures } from "@/lib/useFeatures";
-import { colors, radius, spacing, swatchColors } from "@/theme";
+import { useState } from "react";
+import { ScrollView, Share, StyleSheet, View } from "react-native";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
+import { ApiError } from "@/api/client";
+import { modelCopy, variantsOf } from "@/lib/catalog";
+import { formatCdf, splitProductName } from "@/lib/format";
+import { useProduct, useProducts } from "@/lib/queries";
+import { colors, fonts, motion, radius, spacing } from "@/theme";
+import { AppText } from "@/ui/AppText";
+import { StockBadge } from "@/ui/Badges";
+import { Button, type IconName } from "@/ui/Button";
+import { ColorSwatches } from "@/ui/ColorSwatches";
+import { Header } from "@/ui/Header";
+import { IconButton } from "@/ui/IconButton";
+import { PressableScale } from "@/ui/PressableScale";
+import { ProductImage } from "@/ui/ProductImage";
+import { Screen } from "@/ui/Screen";
+import { EmptyState, LoadingState } from "@/ui/States";
 
-/** Quelques mots sur chaque modèle (le nom, le prix et le stock viennent de l'API). */
-const DESCRIPTIONS: Record<string, string> = {
-  "Le Classique": "Sweat col rond en molleton épais 450 g/m², coupe ample, logo ZIKO SHOP brodé sur la poitrine.",
-  "L'Essentiel": "Hoodie en molleton épais, capuche doublée sans cordons, grande poche kangourou, logo brodé.",
-  "Le Signature": "Pull demi-zip en maille épaisse, col montant côtelé, zip métal gunmetal, logo brodé côté cœur.",
-};
-
-/** Écran 2 — La fiche produit : nom, prix, stock et bouton « Commander ». */
+/** Écran 02 — Fiche produit. La variante choisie est gardée dans l'adresse de l'écran. */
 export default function ProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const cached = productStore.get(id);
-  const [product, setProduct] = useState<Product | undefined>(cached);
-  const [error, setError] = useState<string | null>(null);
-  const features = useFeatures();
+  const product = useProduct(id);
+  const products = useProducts();
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const fresh = await api.getProduct(id);
-      productStore.update(fresh);
-      setProduct(fresh);
-    } catch (err) {
-      // Si on a déjà la version de la liste, on la garde affichée.
-      if (!productStore.get(id)) setError(err instanceof ApiError ? err.message : "Erreur inattendue.");
-    }
-  }, [id]);
-
-  useEffect(() => {
-    setProduct(productStore.get(id));
-    void load();
-  }, [id, load]);
-
-  if (!product) {
-    return error ? (
-      <ErrorState title="Produit indisponible" message={error} onRetry={() => void load()} />
-    ) : (
-      <LoadingState message="Chargement du produit…" />
+  if (!product.data) {
+    return (
+      <Screen>
+        <Header back />
+        {product.isError ? (
+          <EmptyState
+            tone="danger"
+            icon={product.error instanceof ApiError && product.error.status === 404 ? "help-circle-outline" : "cloud-offline-outline"}
+            title={product.error instanceof ApiError && product.error.status === 404 ? "Produit introuvable" : "Serveur injoignable"}
+            message={product.error instanceof ApiError ? product.error.message : undefined}
+            action={<Button title="Réessayer" icon="refresh" onPress={() => void product.refetch()} />}
+          />
+        ) : (
+          <LoadingState message="Chargement du produit…" />
+        )}
+      </Screen>
     );
   }
 
-  const { model, color } = splitProductName(product.name);
-  const variants = productStore.variantsOf(model).filter((variant) => splitProductName(variant.name).color);
-  const soldOut = product.stock <= 0;
+  const current = product.data;
+  const { model, color } = splitProductName(current.name);
+  const copy = modelCopy(model);
+  const variants = variantsOf(products.data ?? [current], current);
+  const soldOut = current.stock <= 0;
+  // Changer de couleur = afficher la variante correspondante (image, prix et stock viennent de l'API).
+  const selectVariant = (variantId: string) => router.setParams({ id: variantId });
+
+  const share = () =>
+    void Share.share({ message: `${current.name} — ${formatCdf(current.priceCdf)} sur Ziko Shop` }).catch(() => undefined);
 
   return (
-    <SafeAreaView style={styles.screen} edges={["bottom", "left", "right"]}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <ProductImage path={product.imageUrl} name={product.name} style={styles.image} />
-
-        <View style={styles.block}>
-          <AppText variant="display">{model}</AppText>
-          {color ? <AppText variant="caption">Couleur : {color}</AppText> : null}
-          <AppText variant="price" style={styles.price}>
-            {formatCdf(product.priceCdf)}
-          </AppText>
-          <View style={styles.stockRow}>
-            <View style={[styles.dot, { backgroundColor: soldOut ? colors.danger : product.stock <= 3 ? colors.accent : colors.success }]} />
-            <AppText variant="caption" color={colors.text}>
-              {soldOut ? "Rupture de stock" : `Stock disponible : ${product.stock} pièce${product.stock > 1 ? "s" : ""}`}
-            </AppText>
+    <Screen edges={["top", "left", "right", "bottom"]}>
+      <Header back right={<IconButton icon="share-outline" label="Partager ce produit" onPress={share} />} />
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Galerie : vignettes des couleurs + grande photo */}
+        <View style={styles.gallery}>
+          {variants.length > 1 ? (
+            <View style={styles.thumbs}>
+              {variants.map((variant) => (
+                <PressableScale
+                  key={variant.id}
+                  onPress={() => selectVariant(variant.id)}
+                  style={[styles.thumb, variant.id === current.id && styles.thumbActive]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Voir ${variant.name}`}
+                  accessibilityState={{ selected: variant.id === current.id }}
+                >
+                  <ProductImage path={variant.imageUrl} name={variant.name} style={styles.thumbImage} />
+                </PressableScale>
+              ))}
+            </View>
+          ) : null}
+          <View style={styles.stage}>
+            <LinearGradient
+              colors={["rgba(208,245,75,0)", "rgba(208,245,75,0.10)", "rgba(208,245,75,0)"]}
+              start={{ x: 0, y: 1 }}
+              end={{ x: 1, y: 0 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+            <ProductImage path={current.imageUrl} name={current.name} style={styles.mainImage} />
           </View>
         </View>
 
-        {variants.length > 1 ? (
-          <View style={styles.block}>
-            <AppText variant="label">Couleurs</AppText>
-            <View style={styles.swatches}>
-              {variants.map((variant) => {
-                const variantColor = splitProductName(variant.name).color ?? "";
-                const selected = variant.id === product.id;
-                return (
-                  <Pressable
-                    key={variant.id}
-                    onPress={() => router.replace({ pathname: "/product/[id]", params: { id: variant.id } })}
-                    style={[styles.swatchRing, selected && styles.swatchSelected]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Couleur ${variantColor}, ${stockLabel(variant.stock)}`}
-                    accessibilityState={{ selected }}
-                  >
-                    <View style={[styles.swatch, { backgroundColor: swatchColors[normalize(variantColor)] ?? colors.border }]} />
-                  </Pressable>
-                );
-              })}
+        <Animated.View key={current.id} entering={FadeIn.duration(motion.base)} style={styles.titleBlock}>
+          <View style={styles.titleRow}>
+            <View style={{ flex: 1 }}>
+              <AppText variant="display" numberOfLines={2}>
+                {model}
+              </AppText>
+              <AppText variant="body">{copy.tagline}</AppText>
             </View>
+            <StockBadge stock={current.stock} />
+          </View>
+          <AppText variant="priceLarge" style={styles.price}>
+            {formatCdf(current.priceCdf)}
+          </AppText>
+        </Animated.View>
+
+        {variants.length > 1 ? (
+          <View style={styles.section}>
+            <AppText variant="bodyStrong">
+              Couleur : <AppText variant="body">{color}</AppText>
+            </AppText>
+            <ColorSwatches
+              options={variants.map((variant) => ({
+                id: variant.id,
+                color: splitProductName(variant.name).color ?? "",
+                disabled: variant.stock <= 0,
+              }))}
+              selectedId={current.id}
+              onSelect={selectVariant}
+            />
           </View>
         ) : null}
 
-        {DESCRIPTIONS[model] ? (
-          <AppText variant="body" muted style={styles.block}>
-            {DESCRIPTIONS[model]}
-          </AppText>
-        ) : null}
-      </ScrollView>
-
-      <View style={styles.actions}>
-        <Button
-          title={soldOut ? "Rupture de stock" : "Commander"}
-          disabled={soldOut}
-          onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: product.id } })}
-        />
-        {features.liveTryOn ? (
+        <View style={styles.actions}>
+          <Button
+            title={soldOut ? "Produit épuisé" : "Commander"}
+            icon={soldOut ? "close-circle-outline" : "bag-handle-outline"}
+            disabled={soldOut}
+            onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: current.id } })}
+          />
           <Button
             title="Essayer en direct"
             variant="secondary"
-            icon="videocam-outline"
-            accessibilityHint="Ouvre la caméra pour vous voir porter ce pull en direct"
-            onPress={() => void WebBrowser.openBrowserAsync(`${API_URL}/essayage?produit=${product.id}`)}
+            icon="scan-outline"
+            accessibilityHint="Ouvre l'essayage virtuel avec la caméra"
+            onPress={() => router.navigate({ pathname: "/essayage", params: { produit: current.id } })}
           />
-        ) : null}
-      </View>
-    </SafeAreaView>
+        </View>
+
+        <View style={styles.accordions}>
+          <Accordion icon="document-text-outline" title="Description du produit" text={copy.description} initiallyOpen />
+          <Accordion icon="layers-outline" title="Matière et entretien" text={copy.material} />
+        </View>
+
+        <View style={styles.trust}>
+          <TrustItem icon="location-outline" title="Livraison" text="À Kinshasa" />
+          <TrustItem icon="shield-checkmark-outline" title="Paiement" text="Jamais débité 2 fois" />
+          <TrustItem icon="pulse-outline" title="Stock" text="En temps réel" />
+        </View>
+      </ScrollView>
+    </Screen>
+  );
+}
+
+function Accordion({ icon, title, text, initiallyOpen }: { icon: IconName; title: string; text: string; initiallyOpen?: boolean }) {
+  const [open, setOpen] = useState(!!initiallyOpen);
+  if (!text) return null;
+  return (
+    <View style={styles.accordion}>
+      <PressableScale
+        haptic={false}
+        onPress={() => setOpen((value) => !value)}
+        style={styles.accordionHead}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+      >
+        <Ionicons name={icon} size={20} color={colors.textSecondary} />
+        <AppText variant="bodyStrong" style={{ flex: 1 }}>
+          {title}
+        </AppText>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={18} color={colors.textSecondary} />
+      </PressableScale>
+      {open ? (
+        <Animated.View entering={FadeInDown.duration(motion.base)}>
+          <AppText variant="body" style={styles.accordionText}>
+            {text}
+          </AppText>
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}
+
+function TrustItem({ icon, title, text }: { icon: IconName; title: string; text: string }) {
+  return (
+    <View style={styles.trustItem}>
+      <Ionicons name={icon} size={20} color={colors.text} />
+      <AppText variant="bodyStrong" center style={styles.trustTitle}>
+        {title}
+      </AppText>
+      <AppText variant="caption" center>
+        {text}
+      </AppText>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.xl, maxWidth: 640, width: "100%", alignSelf: "center" },
-  image: { width: "100%" },
-  block: { gap: spacing.sm },
-  price: { fontSize: 20, marginTop: spacing.xs },
-  stockRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  swatches: { flexDirection: "row", gap: spacing.md },
-  swatchRing: { width: 40, height: 40, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "transparent" },
-  swatchSelected: { borderColor: colors.text },
-  swatch: { width: 30, height: 30, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-  actions: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.md,
-    gap: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    backgroundColor: colors.background,
-    maxWidth: 640,
-    width: "100%",
-    alignSelf: "center",
-  },
+  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.xl, maxWidth: 640, width: "100%", alignSelf: "center" },
+  gallery: { flexDirection: "row", gap: spacing.md },
+  thumbs: { width: 62, gap: spacing.sm },
+  thumb: { borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, padding: 2 },
+  thumbActive: { borderColor: colors.accent },
+  thumbImage: { width: "100%", borderRadius: radius.sm },
+  stage: { flex: 1, borderRadius: radius.xl, overflow: "hidden", backgroundColor: colors.surface },
+  mainImage: { width: "100%", borderRadius: 0 },
+  titleBlock: { gap: spacing.sm },
+  titleRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
+  price: { marginTop: spacing.xs },
+  section: { gap: spacing.md },
+  actions: { gap: spacing.md },
+  accordions: { gap: spacing.sm },
+  accordion: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  accordionHead: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, minHeight: 56 },
+  accordionText: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, marginTop: -spacing.xs },
+  trust: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.xl },
+  trustItem: { flex: 1, alignItems: "center", gap: 4, paddingHorizontal: spacing.xs },
+  trustTitle: { fontFamily: fonts.bold, fontSize: 13 },
 });
