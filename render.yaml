@@ -1,0 +1,32 @@
+# Blueprint Render : crée l'API et sa base PostgreSQL gratuites en un clic
+# (Render > New > Blueprint > ce dépôt). Région Francfort : la plus proche
+# de Kinshasa parmi celles proposées par Render.
+services:
+  - type: web
+    name: ziko-shop-api
+    runtime: docker
+    rootDir: server
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ziko-shop-db
+          property: connectionString
+      # Clé longue générée par Render, à lire dans le tableau de bord.
+      - key: ADMIN_API_KEY
+        generateValue: true
+      - key: SEED_ON_START
+        value: "true"
+      # Facultatif : à saisir dans le tableau de bord pour activer l'essayage en direct.
+      - key: DECART_API_KEY
+        sync: false
+
+databases:
+  - name: ziko-shop-db
+    plan: free
+    region: frankfurt
+    databaseName: ziko_shop
+    user: ziko

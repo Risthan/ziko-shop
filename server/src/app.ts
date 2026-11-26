@@ -22,7 +22,8 @@ export function createApp(db: Db, config: AppConfig): express.Express {
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
 
-  app.use(helmet());
+  // Les images produits doivent pouvoir s'afficher depuis l'app (autre origine).
+  app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
   app.use(
     cors({
       origin: config.CORS_ORIGINS === "*" ? "*" : config.CORS_ORIGINS.split(",").map((origin) => origin.trim()),

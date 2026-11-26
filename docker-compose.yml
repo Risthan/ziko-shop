@@ -1,0 +1,34 @@
+# Lance l'API et sa base PostgreSQL en une commande :
+#   docker compose up --build
+# L'API répond ensuite sur http://localhost:3000 (9 pulls déjà en boutique).
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ziko
+      POSTGRES_PASSWORD: ziko
+      POSTGRES_DB: ziko_shop
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ziko -d ziko_shop"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./server
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://ziko:ziko@db:5432/ziko_shop
+      # Clé locale de démonstration : à changer pour tout usage réel.
+      ADMIN_API_KEY: cle-admin-locale-a-changer
+      SEED_ON_START: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
