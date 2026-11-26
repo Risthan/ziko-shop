@@ -62,6 +62,11 @@ export function tryOnRouter(decartApiKey: string, anywearDomain = ""): Router {
     pageSecurity,
     (_req, res, next) => {
       res.set("Permissions-Policy", widget ? `camera=(self "${ANYWEAR_ORIGIN}"), microphone=()` : "camera=(self), microphone=()");
+      // AnyWear n'autorise l'affichage de sa fenêtre (frame-ancestors) que pour le
+      // site qui l'intègre, d'après l'en-tête Referer. helmet envoie « no-referrer »
+      // par défaut, ce qui bloquerait le widget : sur cette page, on transmet
+      // l'origine (et seulement l'origine) aux sites tiers.
+      res.set("Referrer-Policy", "strict-origin-when-cross-origin");
       next();
     },
     express.static(PAGE_DIR, { maxAge: "1h" }),

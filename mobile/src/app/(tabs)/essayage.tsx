@@ -84,7 +84,6 @@ export default function TryOnScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.titleRow}>
           <AppText variant="h1">Essayage en direct</AppText>
-          <Badge label="IA" tone="accent" icon="sparkles" size="sm" />
         </View>
         <AppText variant="body" style={styles.subtitle}>
           Voyez-vous porter le pull en temps réel, avec la caméra de votre téléphone.
@@ -214,7 +213,7 @@ export default function TryOnScreen() {
         icon="scan-outline"
         tone="accent"
         title="Comment ça marche ?"
-        message="Choisissez un modèle et une couleur, acceptez l'utilisation de la caméra, puis lancez l'essayage : une page sécurisée s'ouvre avec votre caméra frontale et l'IA vous habille en direct. Fermez-la pour revenir ici et commander."
+        message="Choisissez un modèle et une couleur, puis lancez l'essayage. Sur la page qui s'ouvre, touchez « Try-On » en haut de la photo et autorisez la caméra : vous vous voyez porter le pull en direct. Fermez la page pour revenir ici et commander."
       >
         <Button title="J'ai compris" onPress={() => setHelpOpen(false)} />
       </Sheet>

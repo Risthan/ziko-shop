@@ -202,7 +202,7 @@ type TryOnConfig = { mode: "decart"; maxSessionSeconds: number } | { mode: "anyw
 function useAnywearWidget(widgetUrl: string) {
   startButton.hidden = true;
   garment.hidden = false;
-  overlayText.textContent = "Touchez le bouton « Try-On » sur la photo pour vous voir porter ce pull.";
+  overlayText.textContent = "Touchez « Try-On » en haut de la photo, puis autorisez la caméra pour vous voir porter ce pull.";
   const script = document.createElement("script");
   script.src = widgetUrl;
   script.async = true;
