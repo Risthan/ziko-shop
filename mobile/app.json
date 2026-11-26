@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "ZIKO SHOP",
+    "slug": "ziko-shop",
+    "scheme": "zikoshop",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F5F3EF",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zikoshop.app"
+    },
+    "android": {
+      "package": "com.zikoshop.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#F5F3EF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-image",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#F5F3EF"
+        }
+      ],
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
