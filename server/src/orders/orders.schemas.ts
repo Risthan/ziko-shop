@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { parse } from "../http/validation.js";
 
 export const MAX_QUANTITY = 100;
+/** Nombre maximum d'articles différents dans un panier. */
+export const MAX_ITEMS = 20;
 
 /** Identifiant de paiement, comme celui que renverrait un opérateur Mobile Money. */
 export const paymentIdSchema = z
@@ -10,7 +13,7 @@ export const paymentIdSchema = z
     "L'identifiant de paiement doit faire 8 à 64 caractères (lettres, chiffres, - ou _).",
   );
 
-export const createOrderSchema = z.object({
+const itemSchema = z.object({
   productId: z.uuid({ error: "L'identifiant du produit est invalide." }),
   quantity: z
     .number({ error: "La quantité doit être un nombre." })
@@ -19,7 +22,32 @@ export const createOrderSchema = z.object({
     .max(MAX_QUANTITY, `La quantité ne peut pas dépasser ${MAX_QUANTITY}.`),
 });
 
-export type CreateOrderInput = z.infer<typeof createOrderSchema>;
+/** Panier : plusieurs articles, chaque produit une seule fois (avec sa quantité). */
+const cartSchema = z.object({
+  items: z
+    .array(itemSchema, { error: "La liste des articles est invalide." })
+    .min(1, "Le panier est vide.")
+    .max(MAX_ITEMS, `Un panier ne peut pas contenir plus de ${MAX_ITEMS} articles différents.`)
+    .refine(
+      (items) => new Set(items.map((item) => item.productId)).size === items.length,
+      "Un même produit apparaît deux fois : regroupez les quantités.",
+    ),
+});
+
+export type OrderItemInput = z.infer<typeof itemSchema>;
+export interface CreateOrderInput {
+  items: OrderItemInput[];
+}
+
+/**
+ * Deux formats acceptés :
+ * - un seul produit : `{ productId, quantity }` (format de l'énoncé) ;
+ * - un panier : `{ items: [{ productId, quantity }, …] }`.
+ */
+export function parseCreateOrder(body: unknown): CreateOrderInput {
+  const isCart = typeof body === "object" && body !== null && "items" in body;
+  return isCart ? parse(cartSchema, body) : { items: [parse(itemSchema, body)] };
+}
 
 export const payOrderSchema = z.object({
   paymentId: paymentIdSchema,

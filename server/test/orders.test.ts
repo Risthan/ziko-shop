@@ -29,9 +29,8 @@ describe("POST /orders", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.order).toMatchObject({
-      productId: product.id,
-      quantity: 2,
-      unitPriceCdf: 35_000,
+      items: [{ productId: product.id, quantity: 2, unitPriceCdf: 35_000, lineTotalCdf: 70_000 }],
+      itemCount: 2,
       totalCdf: 70_000,
       status: "en_attente",
       paymentId: null,
@@ -96,6 +95,88 @@ describe("POST /orders", () => {
   });
 });
 
+describe("POST /orders avec un panier (plusieurs articles)", () => {
+  it("crée une seule commande avec toutes les lignes, dans l'ordre du panier", async () => {
+    const noir = await insertProduct(db, { name: "Le Classique — Noir", priceCdf: 75_000, stock: 5 });
+    const creme = await insertProduct(db, { name: "L'Essentiel — Crème", priceCdf: 95_000, stock: 5 });
+
+    const res = await request(server)
+      .post("/orders")
+      .send({ items: [{ productId: creme.id, quantity: 1 }, { productId: noir.id, quantity: 2 }] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.order).toMatchObject({
+      items: [
+        { productId: creme.id, quantity: 1, unitPriceCdf: 95_000, lineTotalCdf: 95_000, product: { name: "L'Essentiel — Crème" } },
+        { productId: noir.id, quantity: 2, unitPriceCdf: 75_000, lineTotalCdf: 150_000 },
+      ],
+      itemCount: 3,
+      totalCdf: 245_000,
+      status: "en_attente",
+    });
+    expect(await stockOf(db, noir.id)).toBe(5);
+  });
+
+  it("refuse tout le panier si un seul article manque, et dit lequel", async () => {
+    const noir = await insertProduct(db, { name: "Le Classique — Noir", stock: 5 });
+    const moka = await insertProduct(db, { name: "Le Signature — Moka", stock: 1 });
+
+    const res = await request(server)
+      .post("/orders")
+      .send({ items: [{ productId: noir.id, quantity: 1 }, { productId: moka.id, quantity: 2 }] });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({
+      code: "INSUFFICIENT_STOCK",
+      details: { available: 1, requested: 2, productId: moka.id, productName: "Le Signature — Moka" },
+    });
+    expect(res.body.error.message).toContain("Le Signature — Moka");
+    const { rows } = await db.query("SELECT (SELECT count(*) FROM orders)::int AS orders, (SELECT count(*) FROM order_items)::int AS lines");
+    expect(rows[0]).toEqual({ orders: 0, lines: 0 });
+  });
+
+  it.each([
+    ["un panier vide", { items: [] }],
+    ["le même produit deux fois", "doublon"],
+    ["une quantité invalide dans une ligne", "quantite"],
+  ])("refuse %s", async (_label, body) => {
+    const product = await insertProduct(db);
+    const payload =
+      body === "doublon"
+        ? { items: [{ productId: product.id, quantity: 1 }, { productId: product.id, quantity: 1 }] }
+        : body === "quantite"
+          ? { items: [{ productId: product.id, quantity: 0 }] }
+          : body;
+    const res = await request(server).post("/orders").send(payload);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("répond 404 si un des produits du panier n'existe pas", async () => {
+    const product = await insertProduct(db);
+    const missing = "6f1c2f1e-0000-4000-8000-000000000000";
+    const res = await request(server)
+      .post("/orders")
+      .send({ items: [{ productId: product.id, quantity: 1 }, { productId: missing, quantity: 1 }] });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatchObject({ code: "PRODUCT_NOT_FOUND", details: { productId: missing } });
+  });
+
+  it("la clé d'idempotence protège aussi un panier renvoyé", async () => {
+    const a = await insertProduct(db, { name: "Le Classique — Noir" });
+    const b = await insertProduct(db, { name: "Le Classique — Crème" });
+    const cart = { items: [{ productId: a.id, quantity: 1 }, { productId: b.id, quantity: 3 }] };
+    const send = () => request(server).post("/orders").set("Idempotency-Key", "panier-abc-123").send(cart);
+
+    const [first, second] = await Promise.all([send(), send()]);
+
+    expect(second.body.order.id).toBe(first.body.order.id);
+    expect([first.status, second.status].sort()).toEqual([200, 201]);
+    const { rows } = await db.query("SELECT count(*)::int AS n FROM orders");
+    expect(rows[0].n).toBe(1);
+  });
+});
+
 describe("GET /orders/:id", () => {
   it("renvoie la commande et son statut", async () => {
     const product = await insertProduct(db, { name: "Le Signature — Crème" });
@@ -104,7 +185,7 @@ describe("GET /orders/:id", () => {
     const res = await request(server).get(`/orders/${created.body.order.id}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.order).toMatchObject({ status: "en_attente", product: { name: "Le Signature — Crème" } });
+    expect(res.body.order).toMatchObject({ status: "en_attente", items: [{ product: { name: "Le Signature — Crème" } }] });
   });
 
   it.each(["6f1c2f1e-0000-4000-8000-000000000000", "pas-un-identifiant"])(

@@ -32,15 +32,19 @@ export class AppError extends Error {
 }
 
 export const errors = {
-  productNotFound: () => new AppError(404, "PRODUCT_NOT_FOUND", "Ce produit est introuvable."),
+  productNotFound: (productId?: string) =>
+    new AppError(404, "PRODUCT_NOT_FOUND", "Ce produit est introuvable.", productId ? { productId } : undefined),
   orderNotFound: () => new AppError(404, "ORDER_NOT_FOUND", "Cette commande est introuvable."),
-  insufficientStock: (available: number, requested: number) =>
+  /** `product` précise QUEL article manque quand la commande en contient plusieurs. */
+  insufficientStock: (available: number, requested: number, product?: { id: string; name: string }) =>
     new AppError(
       409,
       "INSUFFICIENT_STOCK",
       available === 0
-        ? "Ce produit est en rupture de stock."
-        : `Stock insuffisant : il reste ${available} pièce(s), vous en demandez ${requested}.`,
-      { available, requested },
+        ? product
+          ? `« ${product.name} » est en rupture de stock.`
+          : "Ce produit est en rupture de stock."
+        : `Stock insuffisant${product ? ` pour « ${product.name} »` : ""} : il reste ${available} pièce(s), vous en demandez ${requested}.`,
+      { available, requested, ...(product ? { productId: product.id, productName: product.name } : {}) },
     ),
 };

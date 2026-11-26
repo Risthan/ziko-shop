@@ -4,12 +4,21 @@ import type { CreateOrderInput } from "./orders.schemas.js";
 
 export type OrderStatus = "en_attente" | "payee";
 
-export interface Order {
-  id: string;
+export interface OrderItem {
   productId: string;
   product: { name: string; imageUrl: string | null };
   quantity: number;
+  /** Prix figé au moment de la commande. */
   unitPriceCdf: number;
+  lineTotalCdf: number;
+}
+
+export interface Order {
+  id: string;
+  /** Les articles, dans l'ordre où le client les a ajoutés. */
+  items: OrderItem[];
+  /** Nombre total de pièces (somme des quantités). */
+  itemCount: number;
   totalCdf: number;
   status: OrderStatus;
   /** Identifiant du paiement qui a réglé la commande (null tant qu'elle n'est pas payée). */
@@ -27,37 +36,38 @@ export type PaymentOutcome = "processed" | "already_processed";
 
 interface OrderRow {
   id: string;
-  product_id: string;
-  quantity: number;
-  unit_price_cdf: number;
   total_cdf: number;
   status: OrderStatus;
   created_at: Date;
   paid_at: Date | null;
-  product_name: string;
-  product_image_url: string | null;
   payment_id: string | null;
+  items: OrderItem[];
 }
 
 type Queryable = Db | DbClient;
 
 const SELECT_ORDER = `
-  SELECT o.id, o.product_id, o.quantity, o.unit_price_cdf, o.total_cdf, o.status,
-         o.created_at, o.paid_at,
-         p.name AS product_name, p.image_url AS product_image_url,
-         pay.id AS payment_id
+  SELECT o.id, o.total_cdf, o.status, o.created_at, o.paid_at, pay.id AS payment_id,
+         json_agg(
+           json_build_object(
+             'productId', i.product_id,
+             'product', json_build_object('name', p.name, 'imageUrl', p.image_url),
+             'quantity', i.quantity,
+             'unitPriceCdf', i.unit_price_cdf,
+             'lineTotalCdf', i.line_total_cdf
+           ) ORDER BY i.position
+         ) AS items
   FROM orders o
-  JOIN products p ON p.id = o.product_id
+  JOIN order_items i ON i.order_id = o.id
+  JOIN products p ON p.id = i.product_id
   LEFT JOIN payments pay ON pay.order_id = o.id
 `;
 
 function toOrder(row: OrderRow): Order {
   return {
     id: row.id,
-    productId: row.product_id,
-    product: { name: row.product_name, imageUrl: row.product_image_url },
-    quantity: row.quantity,
-    unitPriceCdf: row.unit_price_cdf,
+    items: row.items,
+    itemCount: row.items.reduce((sum, item) => sum + item.quantity, 0),
     totalCdf: row.total_cdf,
     status: row.status,
     paymentId: row.payment_id,
@@ -67,7 +77,7 @@ function toOrder(row: OrderRow): Order {
 }
 
 async function findOrder(db: Queryable, where: "o.id" | "o.idempotency_key", value: string): Promise<Order | null> {
-  const result = await db.query<OrderRow>(`${SELECT_ORDER} WHERE ${where} = $1`, [value]);
+  const result = await db.query<OrderRow>(`${SELECT_ORDER} WHERE ${where} = $1 GROUP BY o.id, pay.id`, [value]);
   const row = result.rows[0];
   return row ? toOrder(row) : null;
 }
@@ -88,8 +98,9 @@ export async function getOrder(db: Db, id: string): Promise<Order> {
 }
 
 /**
- * Crée une commande « en attente ». Le stock est vérifié mais pas encore
- * décompté : il ne diminue qu'au paiement.
+ * Crée une commande « en attente » pour un ou plusieurs articles. Le stock de
+ * chaque article est vérifié mais pas encore décompté : il ne diminue qu'au
+ * paiement.
  *
  * Si l'app envoie une clé d'idempotence, renvoyer la même requête (réseau
  * coupé pendant la création) rend la commande déjà créée au lieu d'en créer
@@ -105,22 +116,44 @@ export async function createOrder(
     if (existing) return { order: assertSameOrder(existing, input), replayed: true };
   }
 
-  const product = await db.query<{ price_cdf: number; stock: number }>(
-    "SELECT price_cdf, stock FROM products WHERE id = $1",
-    [input.productId],
+  const ids = input.items.map((item) => item.productId);
+  const found = await db.query<{ id: string; name: string; price_cdf: number; stock: number }>(
+    "SELECT id, name, price_cdf, stock FROM products WHERE id = ANY($1::uuid[])",
+    [ids],
   );
-  const row = product.rows[0];
-  if (!row) throw errors.productNotFound();
-  if (row.stock < input.quantity) throw errors.insufficientStock(row.stock, input.quantity);
+  const products = new Map(found.rows.map((row) => [row.id, row]));
+  const lines = input.items.map((item) => {
+    const product = products.get(item.productId);
+    if (!product) throw errors.productNotFound(item.productId);
+    if (product.stock < item.quantity) throw errors.insufficientStock(product.stock, item.quantity, product);
+    return { ...item, unitPriceCdf: product.price_cdf, lineTotalCdf: product.price_cdf * item.quantity };
+  });
+  const totalCdf = lines.reduce((sum, line) => sum + line.lineTotalCdf, 0);
 
   try {
-    const inserted = await db.query<{ id: string }>(
-      `INSERT INTO orders (product_id, quantity, unit_price_cdf, total_cdf, idempotency_key)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id`,
-      [input.productId, input.quantity, row.price_cdf, row.price_cdf * input.quantity, idempotencyKey ?? null],
-    );
-    return { order: await getOrder(db, inserted.rows[0]!.id), replayed: false };
+    // La commande et ses lignes sont enregistrées ensemble, ou pas du tout.
+    const orderId = await withTransaction(db, async (client) => {
+      const inserted = await client.query<{ id: string }>(
+        "INSERT INTO orders (total_cdf, idempotency_key) VALUES ($1, $2) RETURNING id",
+        [totalCdf, idempotencyKey ?? null],
+      );
+      const id = inserted.rows[0]!.id;
+      await client.query(
+        `INSERT INTO order_items (order_id, product_id, position, quantity, unit_price_cdf, line_total_cdf)
+         SELECT $1, line.product_id, line.position - 1, line.quantity, line.unit_price_cdf, line.line_total_cdf
+         FROM unnest($2::uuid[], $3::int[], $4::int[], $5::int[])
+              WITH ORDINALITY AS line(product_id, quantity, unit_price_cdf, line_total_cdf, position)`,
+        [
+          id,
+          lines.map((line) => line.productId),
+          lines.map((line) => line.quantity),
+          lines.map((line) => line.unitPriceCdf),
+          lines.map((line) => line.lineTotalCdf),
+        ],
+      );
+      return id;
+    });
+    return { order: await getOrder(db, orderId), replayed: false };
   } catch (error) {
     // Deux envois simultanés avec la même clé : le second récupère la commande du premier.
     if (idempotencyKey && isUniqueViolation(error, "orders_idempotency_key_key")) {
@@ -132,7 +165,10 @@ export async function createOrder(
 }
 
 function assertSameOrder(order: Order, input: CreateOrderInput): Order {
-  if (order.productId !== input.productId || order.quantity !== input.quantity) {
+  const same =
+    order.items.length === input.items.length &&
+    order.items.every((item, index) => item.productId === input.items[index]!.productId && item.quantity === input.items[index]!.quantity);
+  if (!same) {
     throw new AppError(
       422,
       "IDEMPOTENCY_KEY_REUSED",
@@ -154,10 +190,15 @@ function assertSameOrder(order: Order, input: CreateOrderInput): Order {
  *    concurrentes sur la même commande attendent leur tour.
  * 2. Une fois le verrou obtenu, on relit le statut : si la commande est déjà
  *    payée, on ne débite rien et on dit pourquoi.
- * 3. Sinon, dans la MÊME transaction : on décompte le stock, on enregistre le
- *    paiement et on passe la commande à « payée ». Tout ou rien.
- * 4. Filet de sécurité : la base refuse un même identifiant de paiement deux
- *    fois (clé primaire) et un second paiement pour une commande (UNIQUE).
+ * 3. On verrouille les produits de la commande, TOUJOURS dans le même ordre
+ *    (par identifiant) : deux paniers qui partagent des produits ne peuvent pas
+ *    se bloquer mutuellement.
+ * 4. Dans la MÊME transaction : on décompte le stock de chaque article, on
+ *    enregistre le paiement et on passe la commande à « payée ». Tout ou rien :
+ *    s'il manque une seule pièce, rien n'est débité.
+ * 5. Filet de sécurité : la base refuse un même identifiant de paiement deux
+ *    fois (clé primaire), un second paiement pour une commande (UNIQUE) et un
+ *    stock négatif (CHECK).
  */
 export async function payOrder(
   db: Db,
@@ -166,8 +207,8 @@ export async function payOrder(
 ): Promise<{ order: Order; outcome: PaymentOutcome }> {
   try {
     return await withTransaction(db, async (client) => {
-      const locked = await client.query<{ product_id: string; quantity: number; total_cdf: number; status: OrderStatus }>(
-        "SELECT product_id, quantity, total_cdf, status FROM orders WHERE id = $1 FOR UPDATE",
+      const locked = await client.query<{ total_cdf: number; status: OrderStatus }>(
+        "SELECT total_cdf, status FROM orders WHERE id = $1 FOR UPDATE",
         [orderId],
       );
       const order = locked.rows[0];
@@ -196,14 +237,24 @@ export async function payOrder(
         );
       }
 
-      const product = await client.query<{ stock: number }>(
-        "SELECT stock FROM products WHERE id = $1 FOR UPDATE",
-        [order.product_id],
+      const stock = await client.query<{ id: string; name: string; stock: number; quantity: number }>(
+        `SELECT p.id, p.name, p.stock, i.quantity
+         FROM products p
+         JOIN order_items i ON i.product_id = p.id AND i.order_id = $1
+         ORDER BY p.id
+         FOR UPDATE OF p`,
+        [orderId],
       );
-      const stock = product.rows[0]!.stock;
-      if (stock < order.quantity) throw errors.insufficientStock(stock, order.quantity);
+      for (const line of stock.rows) {
+        if (line.stock < line.quantity) throw errors.insufficientStock(line.stock, line.quantity, line);
+      }
 
-      await client.query("UPDATE products SET stock = stock - $1 WHERE id = $2", [order.quantity, order.product_id]);
+      await client.query(
+        `UPDATE products p SET stock = p.stock - i.quantity
+         FROM order_items i
+         WHERE i.order_id = $1 AND p.id = i.product_id`,
+        [orderId],
+      );
       await client.query("INSERT INTO payments (id, order_id, amount_cdf) VALUES ($1, $2, $3)", [
         paymentId,
         orderId,

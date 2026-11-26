@@ -151,3 +151,87 @@ describe("POST /orders/:id/pay", () => {
     expect(res.body.error.code).toBe("VALIDATION_ERROR");
   });
 });
+
+describe("Paiement d'un panier (plusieurs articles)", () => {
+  async function createCart(items: { productId: string; quantity: number }[]): Promise<string> {
+    const res = await request(server).post("/orders").send({ items });
+    expect(res.status).toBe(201);
+    return res.body.order.id as string;
+  }
+
+  it("un seul paiement décompte le stock de chaque article", async () => {
+    const a = await insertProduct(db, { name: "Le Classique — Noir", priceCdf: 75_000, stock: 5 });
+    const b = await insertProduct(db, { name: "Le Signature — Moka", priceCdf: 125_000, stock: 4 });
+    const orderId = await createCart([
+      { productId: a.id, quantity: 2 },
+      { productId: b.id, quantity: 1 },
+    ]);
+
+    const res = await pay(orderId, "MM-PANIER-0001");
+
+    expect(res.status).toBe(200);
+    expect(res.body.order).toMatchObject({ status: "payee", totalCdf: 275_000, itemCount: 3 });
+    expect(await stockOf(db, a.id)).toBe(3);
+    expect(await stockOf(db, b.id)).toBe(3);
+    const { rows } = await db.query("SELECT amount_cdf FROM payments WHERE id = 'MM-PANIER-0001'");
+    expect(rows[0].amount_cdf).toBe(275_000);
+  });
+
+  it("tout ou rien : si un article est épuisé entre-temps, aucun stock ne bouge et rien n'est payé", async () => {
+    const a = await insertProduct(db, { name: "Le Classique — Noir", stock: 5 });
+    const b = await insertProduct(db, { name: "Le Signature — Moka", stock: 1 });
+    const cart = await createCart([
+      { productId: a.id, quantity: 2 },
+      { productId: b.id, quantity: 1 },
+    ]);
+    // Un autre client achète la dernière pièce de b avant notre paiement.
+    await pay(await createOrder(b.id, 1), "MM-AUTRE-CLIENT");
+
+    const res = await pay(cart, "MM-PANIER-0002");
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({ code: "INSUFFICIENT_STOCK", details: { productName: "Le Signature — Moka" } });
+    expect(await stockOf(db, a.id)).toBe(5); // inchangé
+    expect(await paymentCount(db)).toBe(1); // seulement celui de l'autre client
+    const order = await request(server).get(`/orders/${cart}`);
+    expect(order.body.order.status).toBe("en_attente");
+  });
+
+  it("10 envois simultanés du même paiement de panier : un seul débit", async () => {
+    const a = await insertProduct(db, { name: "Le Classique — Noir", stock: 10 });
+    const b = await insertProduct(db, { name: "L'Essentiel — Crème", stock: 10 });
+    const orderId = await createCart([
+      { productId: a.id, quantity: 1 },
+      { productId: b.id, quantity: 2 },
+    ]);
+
+    const responses = await Promise.all(Array.from({ length: 10 }, () => pay(orderId, "MM-PANIER-0003")));
+
+    expect(responses.filter((res) => res.body.payment?.outcome === "processed")).toHaveLength(1);
+    expect(responses.filter((res) => res.body.payment?.outcome === "already_processed")).toHaveLength(9);
+    expect(await stockOf(db, a.id)).toBe(9);
+    expect(await stockOf(db, b.id)).toBe(8);
+    expect(await paymentCount(db)).toBe(1);
+  });
+
+  it("deux paniers qui partagent les mêmes produits, payés en même temps : pas de blocage, stock juste", async () => {
+    const a = await insertProduct(db, { name: "Le Classique — Noir", stock: 10 });
+    const b = await insertProduct(db, { name: "L'Essentiel — Crème", stock: 10 });
+    // Ordres inverses dans les deux paniers : sans verrouillage ordonné, risque d'interblocage.
+    const first = await createCart([
+      { productId: a.id, quantity: 1 },
+      { productId: b.id, quantity: 1 },
+    ]);
+    const second = await createCart([
+      { productId: b.id, quantity: 2 },
+      { productId: a.id, quantity: 2 },
+    ]);
+
+    const [resA, resB] = await Promise.all([pay(first, "MM-PANIER-A-01"), pay(second, "MM-PANIER-B-01")]);
+
+    expect([resA.status, resB.status]).toEqual([200, 200]);
+    expect(await stockOf(db, a.id)).toBe(7);
+    expect(await stockOf(db, b.id)).toBe(7);
+    expect(await paymentCount(db)).toBe(2);
+  });
+});

@@ -3,7 +3,7 @@ import rateLimit from "express-rate-limit";
 import type { Db } from "../db/pool.js";
 import { errors } from "../http/errors.js";
 import { parse, uuidSchema } from "../http/validation.js";
-import { createOrderSchema, idempotencyKeySchema, payOrderSchema } from "./orders.schemas.js";
+import { idempotencyKeySchema, parseCreateOrder, payOrderSchema } from "./orders.schemas.js";
 import { createOrder, getOrder, payOrder } from "./orders.service.js";
 
 /** Un identifiant mal formé ne peut désigner aucune commande : réponse « introuvable ». */
@@ -27,9 +27,10 @@ export function ordersRouter(db: Db): Router {
     },
   });
 
-  // 3. Passer une commande : refusée si le stock est insuffisant, sinon « en attente ».
+  // 3. Passer une commande (un produit ou tout un panier) : refusée si le stock
+  //    est insuffisant pour un des articles, sinon « en attente ».
   router.post("/", async (req, res) => {
-    const input = parse(createOrderSchema, req.body);
+    const input = parseCreateOrder(req.body);
     const idempotencyKey = parse(idempotencyKeySchema, req.get("idempotency-key"));
     const { order, replayed } = await createOrder(db, input, idempotencyKey);
     if (replayed) res.set("Idempotent-Replayed", "true");
