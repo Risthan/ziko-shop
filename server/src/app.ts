@@ -1,0 +1,69 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import cors from "cors";
+import express from "express";
+import rateLimit from "express-rate-limit";
+import helmet from "helmet";
+import type { Config } from "./config.js";
+import type { Db } from "./db/pool.js";
+import { errorHandler, notFoundHandler, requestLogger } from "./http/middleware.js";
+import { ordersRouter } from "./orders/orders.routes.js";
+import { productsRouter } from "./products/products.routes.js";
+
+const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
+
+export type AppConfig = Pick<Config, "NODE_ENV" | "ADMIN_API_KEY" | "CORS_ORIGINS" | "DECART_API_KEY">;
+
+export function createApp(db: Db, config: AppConfig): express.Express {
+  const app = express();
+
+  // Render (et la plupart des hébergeurs) placent l'API derrière un proxy :
+  // nécessaire pour que la limite de débit voie la vraie adresse IP du client.
+  app.set("trust proxy", 1);
+  app.disable("x-powered-by");
+
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: config.CORS_ORIGINS === "*" ? "*" : config.CORS_ORIGINS.split(",").map((origin) => origin.trim()),
+    }),
+  );
+  app.use(express.json({ limit: "10kb" }));
+  if (config.NODE_ENV !== "test") app.use(requestLogger);
+
+  // Limite globale : 300 requêtes par 15 minutes et par adresse IP.
+  app.use(
+    rateLimit({
+      windowMs: 15 * 60_000,
+      limit: 300,
+      standardHeaders: "draft-8",
+      legacyHeaders: false,
+      handler: (_req, res) => {
+        res.status(429).json({ error: { code: "RATE_LIMITED", message: "Trop de requêtes. Réessayez dans quelques minutes." } });
+      },
+    }),
+  );
+
+  app.use("/images", express.static(path.join(PUBLIC_DIR, "images"), { maxAge: "7d", immutable: true }));
+
+  app.get("/", (_req, res) => {
+    res.json({ name: "ZIKO SHOP API", docs: "https://github.com/ (voir le README du dépôt)", health: "/health" });
+  });
+
+  app.get("/health", async (_req, res) => {
+    await db.query("SELECT 1");
+    res.json({ status: "ok" });
+  });
+
+  // Fonctionnalités facultatives activées sur ce serveur (l'app adapte son interface).
+  app.get("/features", (_req, res) => {
+    res.json({ liveTryOn: config.DECART_API_KEY.length > 0 });
+  });
+
+  app.use("/products", productsRouter(db, config.ADMIN_API_KEY));
+  app.use("/orders", ordersRouter(db));
+
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+  return app;
+}
