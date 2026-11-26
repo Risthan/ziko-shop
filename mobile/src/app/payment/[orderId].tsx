@@ -2,7 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { ScrollView, StyleSheet, Switch, View } from "react-native";
-import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown, FadeOut } from "react-native-reanimated";
 import { ApiError } from "@/api/client";
 import type { Order } from "@/api/types";
 import { formatCdf, orderReference } from "@/lib/format";
@@ -125,11 +125,16 @@ export default function PaymentScreen() {
               />
             </Card>
 
-            <Notice
-              tone="success"
-              title="Paiement protégé"
-              message="En cas de coupure réseau, votre paiement reste sécurisé : il ne sera jamais débité deux fois."
-            />
+            {/* Visible uniquement quand le mode démo est activé. */}
+            {simulateCut ? (
+              <Animated.View entering={FadeIn.duration(motion.base)} exiting={FadeOut.duration(motion.fast)}>
+                <Notice
+                  tone="success"
+                  title="Paiement protégé"
+                  message="En cas de coupure réseau, votre paiement reste sécurisé : il ne sera jamais débité deux fois."
+                />
+              </Animated.View>
+            ) : null}
           </>
         )}
       </ScrollView>
