@@ -111,8 +111,8 @@ describe("Supprimer ou retirer un produit (administration)", () => {
     const res = await request(server)
       .patch(`/products/${product.id}`)
       .set(admin)
-      .send({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v2.jpg" });
-    expect(res.body.product).toMatchObject({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v2.jpg" });
+      .send({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v3.jpg" });
+    expect(res.body.product).toMatchObject({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v3.jpg" });
   });
 });
 
