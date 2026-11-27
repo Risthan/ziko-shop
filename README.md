@@ -9,7 +9,7 @@ Ziko Shop vend trois modèles de pulls (Le Classique, L'Essentiel, Le Signature)
 | | Lien |
 |---|---|
 | API en ligne | https://ziko-shop-api.onrender.com (`/health`, `/products`) |
-| App (EAS Update, Expo Go) | https://expo.dev/accounts/risthan243/projects/ziko-shop. Onglet « Updates », branche `production`, bouton « Aperçu » : QR code à scanner avec Expo Go. |
+| App (EAS Update, Expo Go) | https://expo.dev/accounts/risthan-apps/projects/ziko-shop. Onglet « Updates », branche `production`, bouton « Aperçu » : QR code à scanner avec Expo Go. |
 | Dépôt | https://github.com/Risthan/ziko-shop |
 
 <p>
