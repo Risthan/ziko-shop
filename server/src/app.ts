@@ -5,6 +5,7 @@ import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
+import { authRouter } from "./auth/auth.routes.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/pool.js";
 import { errorHandler, notFoundHandler, requestLogger } from "./http/middleware.js";
@@ -66,6 +67,7 @@ export function createApp(db: Db, config: AppConfig): express.Express {
   });
 
   app.use("/products", productsRouter(db, config.ADMIN_API_KEY));
+  app.use(authRouter(db));
   app.use("/orders", ordersRouter(db));
   // Facultatif et isolé : essayage en direct (voir src/tryon).
   app.use(tryOnRouter(config.FAL_KEY));

@@ -13,7 +13,7 @@ export async function createTestDb(): Promise<Db> {
 }
 
 export async function resetDb(db: Db): Promise<void> {
-  await db.query("TRUNCATE payments, orders, products RESTART IDENTITY CASCADE");
+  await db.query("TRUNCATE payments, orders, products, users RESTART IDENTITY CASCADE");
 }
 
 /** Une app neuve à chaque test : les compteurs de limite de débit repartent de zéro. */
