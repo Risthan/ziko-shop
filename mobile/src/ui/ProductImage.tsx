@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { imageUrl } from "@/config";
-import { colors, radius } from "@/theme";
+import { colors, photoBackdrop, radius } from "@/theme";
 import { AppText } from "./AppText";
 
 interface Props {
@@ -12,19 +12,20 @@ interface Props {
 }
 
 /**
- * Photo produit sur le même anthracite que son fond de studio : le pull
- * semble posé sur la carte. Fondu enchaîné quand on change de couleur.
+ * Photo produit. Le cadre a la couleur du fond de studio des photos : la photo
+ * remplit le cadre bord à bord, sans liseré qui dépasse, même pendant le
+ * chargement. Fondu enchaîné quand on change de couleur.
  */
 export function ProductImage({ path, name, style, fit = "cover" }: Props) {
   const uri = imageUrl(path);
   return (
-    <View style={[styles.frame, style]}>
+    <View style={[styles.frame, uri ? styles.withPhoto : null, style]}>
       {uri ? (
         <Image
           source={{ uri }}
           style={StyleSheet.absoluteFill}
           contentFit={fit}
-          transition={250}
+          transition={200}
           cachePolicy="memory-disk"
           accessibilityLabel={`Photo : ${name}`}
         />
@@ -46,4 +47,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  withPhoto: { backgroundColor: photoBackdrop },
 });

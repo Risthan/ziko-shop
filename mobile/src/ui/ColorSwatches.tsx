@@ -1,6 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { normalize } from "@/lib/format";
-import { colors, radius, swatchColors } from "@/theme";
+import { swatchFor } from "@/lib/swatches";
+import { colors, radius } from "@/theme";
 import { PressableScale } from "./PressableScale";
 
 export interface SwatchOption {
@@ -9,7 +10,8 @@ export interface SwatchOption {
   disabled?: boolean;
 }
 
-const swatch = (name: string) => swatchColors[normalize(name)] ?? colors.textTertiary;
+/** La vraie couleur du pull ; gris neutre seulement pour une couleur inconnue. */
+const swatch = (name: string) => swatchFor(name) ?? colors.textTertiary;
 
 /** Sélecteur de couleurs (les variantes d'un même modèle). */
 export function ColorSwatches({ options, selectedId, onSelect, size = 36 }: { options: SwatchOption[]; selectedId: string; onSelect: (id: string) => void; size?: number }) {

@@ -1,16 +1,16 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
-import { ScrollView, Share, StyleSheet, View } from "react-native";
+import { useEffect, useState } from "react";
+import { PixelRatio, ScrollView, Share, StyleSheet, useWindowDimensions, View } from "react-native";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { ApiError } from "@/api/client";
 import { cart } from "@/lib/cart/useCart";
 import { modelCopy, variantsOf } from "@/lib/catalog";
 import { formatCdf, splitProductName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { prefetchProductImages } from "@/lib/prefetch";
 import { useProduct, useProducts } from "@/lib/queries";
-import { colors, fonts, motion, radius, spacing } from "@/theme";
+import { colors, fonts, motion, photoBackdrop, radius, spacing } from "@/theme";
 import { AppText } from "@/ui/AppText";
 import { StockBadge } from "@/ui/Badges";
 import { AddedToCart } from "@/ui/AddedToCart";
@@ -24,14 +24,53 @@ import { ProductImage } from "@/ui/ProductImage";
 import { Screen } from "@/ui/Screen";
 import { EmptyState, LoadingState } from "@/ui/States";
 
+const MAX_CONTENT = 640;
+const THUMB_MAX = 62;
+/** Bordure (1,5) et marge intérieure (2) d'une vignette, des deux côtés. */
+const THUMB_CHROME = 7;
+const THUMB_MIN = 40;
+
+/**
+ * Tailles exactes de la galerie : la grande photo (3:4) et la colonne de
+ * vignettes (3:4) ont la même hauteur, quel que soit le nombre de couleurs.
+ * On prend la plus grande vignette (62 pt au plus) pour laquelle la colonne
+ * tient dans la hauteur de la grande photo ; au-delà de ~7 couleurs, les
+ * vignettes deviendraient trop petites et la photo prend toute la largeur
+ * (les pastilles restent là pour changer de couleur).
+ */
+function galleryLayout(contentWidth: number, count: number) {
+  const round = PixelRatio.roundToNearestPixel;
+  const gapX = spacing.md;
+  const gapY = spacing.sm;
+  const fit =
+    ((4 / 3) * (contentWidth - gapX) - (count - 1) * gapY + (count * THUMB_CHROME) / 3) / ((4 / 3) * (count + 1));
+  const thumbWidth = count > 1 && fit >= THUMB_MIN ? Math.floor(Math.min(THUMB_MAX, fit)) : 0;
+  const mainWidth = round(thumbWidth ? contentWidth - thumbWidth - gapX : contentWidth);
+  const height = round((mainWidth * 4) / 3);
+  // Quand les vignettes remplissent presque la hauteur, on les répartit sur toute
+  // la hauteur : la dernière s'arrête pile au bas de la grande photo.
+  const columnHeight = count * (((thumbWidth - THUMB_CHROME) * 4) / 3 + THUMB_CHROME) + (count - 1) * gapY;
+  const fillColumn = thumbWidth > 0 && height - columnHeight <= gapY * 2;
+  return { thumbWidth, thumbImageWidth: thumbWidth - THUMB_CHROME, mainWidth, height, fillColumn };
+}
+
 /** Écran 02 — Fiche produit. La variante choisie est gardée dans l'adresse de l'écran. */
 export default function ProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const product = useProduct(id);
   const products = useProducts();
   const [addedId, setAddedId] = useState<string | null>(null);
+  const { width: windowWidth } = useWindowDimensions();
+  const current = product.data;
+  const variants = current ? variantsOf(products.data ?? [current], current) : [];
 
-  if (!product.data) {
+  // Les photos des autres couleurs sont chargées d'avance : changer de couleur est instantané.
+  const variantKey = variants.map((variant) => variant.imageUrl).join("|");
+  useEffect(() => {
+    prefetchProductImages(variants);
+  }, [variantKey]); // la liste change d'identité à chaque rendu : on suit les photos
+
+  if (!current) {
     return (
       <Screen>
         <Header back />
@@ -50,10 +89,9 @@ export default function ProductScreen() {
     );
   }
 
-  const current = product.data;
   const { model, color } = splitProductName(current.name);
   const copy = modelCopy(model);
-  const variants = variantsOf(products.data ?? [current], current);
+  const gallery = galleryLayout(Math.min(windowWidth, MAX_CONTENT) - spacing.lg * 2, variants.length);
   const soldOut = current.stock <= 0;
   // Changer de couleur = afficher la variante correspondante (image, prix et stock viennent de l'API).
   const selectVariant = (variantId: string) => router.setParams({ id: variantId });
@@ -74,9 +112,9 @@ export default function ProductScreen() {
       />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Galerie : vignettes des couleurs + grande photo */}
-        <View style={styles.gallery}>
-          {variants.length > 1 ? (
-            <View style={styles.thumbs}>
+        <View style={[styles.gallery, { height: gallery.height }]}>
+          {gallery.thumbWidth ? (
+            <View style={[styles.thumbs, { width: gallery.thumbWidth }, gallery.fillColumn && { height: gallery.height, justifyContent: "space-between" }]}>
               {variants.map((variant) => (
                 <PressableScale
                   key={variant.id}
@@ -86,20 +124,13 @@ export default function ProductScreen() {
                   accessibilityLabel={`Voir ${variant.name}`}
                   accessibilityState={{ selected: variant.id === current.id }}
                 >
-                  <ProductImage path={variant.imageUrl} name={variant.name} style={styles.thumbImage} />
+                  <ProductImage path={variant.imageUrl} name={variant.name} style={[styles.thumbImage, { width: gallery.thumbImageWidth }]} />
                 </PressableScale>
               ))}
             </View>
           ) : null}
-          <View style={styles.stage}>
-            <LinearGradient
-              colors={["rgba(208,245,75,0)", "rgba(208,245,75,0.10)", "rgba(208,245,75,0)"]}
-              start={{ x: 0, y: 1 }}
-              end={{ x: 1, y: 0 }}
-              style={StyleSheet.absoluteFill}
-              pointerEvents="none"
-            />
-            <ProductImage path={current.imageUrl} name={current.name} style={styles.mainImage} />
+          <View style={[styles.stage, { width: gallery.mainWidth, height: gallery.height }]}>
+            <ProductImage path={current.imageUrl} name={current.name} style={[styles.mainImage, { width: gallery.mainWidth, height: gallery.height }]} />
           </View>
         </View>
 
@@ -228,14 +259,14 @@ function TrustItem({ icon, title, text }: { icon: IconName; title: string; text:
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.xl, maxWidth: 640, width: "100%", alignSelf: "center" },
-  gallery: { flexDirection: "row", gap: spacing.md },
-  thumbs: { width: 62, gap: spacing.sm },
+  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.xl, maxWidth: MAX_CONTENT, width: "100%", alignSelf: "center" },
+  gallery: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start" },
+  thumbs: { gap: spacing.sm },
   thumb: { borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, padding: 2 },
   thumbActive: { borderColor: colors.accent },
-  thumbImage: { width: "100%", borderRadius: radius.sm },
-  stage: { flex: 1, borderRadius: radius.xl, overflow: "hidden", backgroundColor: colors.surface },
-  mainImage: { width: "100%", borderRadius: 0 },
+  thumbImage: { borderRadius: radius.sm },
+  stage: { borderRadius: radius.xl, overflow: "hidden", backgroundColor: photoBackdrop },
+  mainImage: { borderRadius: 0 },
   titleBlock: { gap: spacing.sm },
   titleRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   price: { marginTop: spacing.xs },

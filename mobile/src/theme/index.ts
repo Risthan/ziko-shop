@@ -72,9 +72,10 @@ export const motion = {
   spring: { damping: 18, stiffness: 220, mass: 0.8 },
 } as const;
 
-/** Pastilles de couleur, d'après le nom de la couleur du pull. */
-export const swatchColors: Record<string, string> = {
-  noir: "#0E0E0E",
-  creme: "#E9DFCC",
-  moka: "#6B4532",
-};
+/**
+ * Fond de studio des photos produit (gris clair, relevé sur les photos). Le
+ * cadre d'une photo prend cette couleur : aucun liseré gris foncé ne dépasse
+ * autour du pull, même pendant le chargement ou au bord d'un angle arrondi.
+ * Les pastilles de couleur sont dans src/lib/swatches.ts.
+ */
+export const photoBackdrop = "#E5EBEE";

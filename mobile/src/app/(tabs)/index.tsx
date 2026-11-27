@@ -8,8 +8,9 @@ import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { ApiError } from "@/api/client";
 import type { Product } from "@/api/types";
 import { groupByModel, type ModelGroup } from "@/lib/catalog";
-import { normalize, orderReference, splitProductName } from "@/lib/format";
+import { formatCdf, normalize, orderReference, splitProductName } from "@/lib/format";
 import { orderHistory } from "@/lib/orderHistory";
+import { prefetchProductImages } from "@/lib/prefetch";
 import { paymentController } from "@/lib/payment/usePayment";
 import { useOrder, useProducts } from "@/lib/queries";
 import { colors, motion, radius, spacing } from "@/theme";
@@ -17,6 +18,7 @@ import { AppText } from "@/ui/AppText";
 import { Button } from "@/ui/Button";
 import { SectionTitle } from "@/ui/Card";
 import { CartButton } from "@/ui/CartButton";
+import { ColorDots } from "@/ui/ColorSwatches";
 import { Logo } from "@/ui/Logo";
 import { ProductCard, ProductCardSkeleton } from "@/ui/ProductCard";
 import { ProductImage } from "@/ui/ProductImage";
@@ -30,11 +32,37 @@ const GAP = spacing.md;
 
 const openProduct = (id: string) => router.push({ pathname: "/product/[id]", params: { id } });
 
-/** Écran 01 — Accueil et catalogue, chargé depuis l'API. */
+/** Une ligne de la grille : l'en-tête d'un modèle, ou une rangée de cartes. */
+type Row =
+  | { kind: "skeleton"; key: string }
+  | { kind: "section"; key: string; group: ModelGroup; first: boolean }
+  | { kind: "cards"; key: string; products: Product[]; startIndex: number };
+
+const SKELETON_ROWS: Row[] = [
+  { kind: "skeleton", key: "s1" },
+  { kind: "skeleton", key: "s2" },
+];
+
+/** Chaque modèle forme une catégorie : son en-tête, puis ses couleurs, rangée par rangée. */
+function buildRows(groups: ModelGroup[], columns: number, withHeaders: boolean): Row[] {
+  const rows: Row[] = [];
+  let index = 0;
+  groups.forEach((group, groupIndex) => {
+    if (withHeaders) rows.push({ kind: "section", key: `section-${group.model}`, group, first: groupIndex === 0 });
+    for (let start = 0; start < group.variants.length; start += columns) {
+      const products = group.variants.slice(start, start + columns);
+      rows.push({ kind: "cards", key: products.map((product) => product.id).join("|"), products, startIndex: index });
+      index += products.length;
+    }
+  });
+  return rows;
+}
+
+/** Écran 01 — Accueil et catalogue, chargé depuis l'API et rangé par modèle. */
 export default function HomeScreen() {
   const products = useProducts();
   const client = useQueryClient();
-  const listRef = useRef<FlatList<Product | string>>(null);
+  const listRef = useRef<FlatList<Row>>(null);
   const [search, setSearch] = useState("");
   const [collection, setCollection] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -43,21 +71,23 @@ export default function HomeScreen() {
   const all = products.data ?? [];
   const groups = useMemo(() => groupByModel(all), [all]);
 
-  const visible = useMemo(() => {
+  // Toutes les photos sont chargées d'avance : la grille et les fiches s'affichent sans attente.
+  useEffect(() => {
+    prefetchProductImages(all);
+  }, [all]);
+
+  const visibleGroups = useMemo(() => {
     const query = normalize(search);
-    return all.filter(
-      (product) =>
-        (!collection || splitProductName(product.name).model === collection) && (!query || normalize(product.name).includes(query)),
-    );
-  }, [all, collection, search]);
+    return groups
+      .filter((group) => !collection || group.model === collection)
+      .map((group) => ({ ...group, variants: group.variants.filter((product) => !query || normalize(product.name).includes(query)) }))
+      .filter((group) => group.variants.length > 0);
+  }, [groups, collection, search]);
+  const visibleCount = visibleGroups.reduce((total, group) => total + group.variants.length, 0);
 
   const columns = width >= 700 ? 3 : 2;
   const contentWidth = Math.min(width, 1000);
   const cardWidth = (contentWidth - PADDING * 2 - GAP * (columns - 1)) / columns;
-  const colorsByModel = useMemo(
-    () => new Map(groups.map((group) => [group.model, group.variants.map((variant) => splitProductName(variant.name).color ?? "")])),
-    [groups],
-  );
 
   const refresh = async () => {
     setRefreshing(true);
@@ -67,7 +97,8 @@ export default function HomeScreen() {
 
   const loading = products.isPending;
   const failed = products.isError && all.length === 0;
-  const data: (Product | string)[] = loading ? ["s1", "s2", "s3", "s4"] : failed ? [] : visible;
+  // Une seule collection choisie : son nom est déjà le titre, pas besoin d'en-tête en plus.
+  const rows = loading ? SKELETON_ROWS : failed ? [] : buildRows(visibleGroups, columns, !collection);
 
   const header = (
     <View style={styles.header}>
@@ -100,7 +131,7 @@ export default function HomeScreen() {
       {!failed ? (
         <SectionTitle
           title={search ? "Résultats" : collection ?? "Toute la collection"}
-          right={!loading ? <AppText variant="small">{visible.length} pull{visible.length > 1 ? "s" : ""}</AppText> : undefined}
+          right={!loading ? <AppText variant="small">{visibleCount} pull{visibleCount > 1 ? "s" : ""}</AppText> : undefined}
         />
       ) : null}
       {loading ? <SlowServerHint /> : null}
@@ -111,29 +142,34 @@ export default function HomeScreen() {
     <Screen>
       <FlatList
         ref={listRef}
-        key={columns}
-        data={data}
-        numColumns={columns}
-        keyExtractor={(item) => (typeof item === "string" ? item : item.id)}
+        data={rows}
+        keyExtractor={(row) => row.key}
         ListHeaderComponent={header}
         contentContainerStyle={styles.list}
-        columnWrapperStyle={styles.row}
         ItemSeparatorComponent={() => <View style={{ height: GAP }} />}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
+        initialNumToRender={6}
+        windowSize={9}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} colors={[colors.accent]} />}
-        renderItem={({ item, index }) =>
-          typeof item === "string" ? (
-            <ProductCardSkeleton width={cardWidth} />
+        renderItem={({ item: row }) =>
+          row.kind === "section" ? (
+            <ModelHeader group={row.group} first={row.first} />
           ) : (
-            <ProductCard
-              product={item}
-              width={cardWidth}
-              index={index}
-              modelColors={colorsByModel.get(splitProductName(item.name).model) ?? []}
-              onPress={() => openProduct(item.id)}
-            />
+            <View style={styles.cardsRow}>
+              {row.kind === "skeleton"
+                ? Array.from({ length: columns }, (_, index) => <ProductCardSkeleton key={index} width={cardWidth} />)
+                : row.products.map((product, index) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      width={cardWidth}
+                      index={row.startIndex + index}
+                      onPress={() => openProduct(product.id)}
+                    />
+                  ))}
+            </View>
           )
         }
         ListEmptyComponent={
@@ -158,6 +194,33 @@ export default function HomeScreen() {
         }
       />
     </Screen>
+  );
+}
+
+/** En-tête d'une catégorie : le modèle, son type de pull, son prix et ses couleurs. */
+function ModelHeader({ group, first }: { group: ModelGroup; first: boolean }) {
+  const prices = group.variants.map((variant) => variant.priceCdf);
+  const lowest = Math.min(...prices);
+  const samePrice = prices.every((price) => price === lowest);
+  const count = group.variants.length;
+  return (
+    <View style={[styles.modelHeader, !first && styles.modelHeaderSpaced]} accessibilityRole="header">
+      <View style={styles.modelText}>
+        <AppText variant="h2" numberOfLines={1}>
+          {group.model}
+        </AppText>
+        <AppText variant="small" numberOfLines={1}>
+          {group.tagline} · {samePrice ? "" : "dès "}
+          {formatCdf(lowest)}
+        </AppText>
+      </View>
+      <View style={styles.modelColors}>
+        <ColorDots colorsList={group.variants.map((variant) => splitProductName(variant.name).color ?? "")} />
+        <AppText variant="caption">
+          {count} couleur{count > 1 ? "s" : ""}
+        </AppText>
+      </View>
+    </View>
   );
 }
 
@@ -268,7 +331,11 @@ function SlowServerHint() {
 
 const styles = StyleSheet.create({
   list: { paddingHorizontal: PADDING, paddingBottom: spacing.xxl, maxWidth: 1000, width: "100%", alignSelf: "center" },
-  row: { gap: GAP },
+  cardsRow: { flexDirection: "row", gap: GAP },
+  modelHeader: { flexDirection: "row", alignItems: "flex-end", gap: spacing.md },
+  modelHeaderSpaced: { marginTop: spacing.md, paddingTop: spacing.xl, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  modelText: { flex: 1, gap: 2 },
+  modelColors: { alignItems: "flex-end", gap: 4 },
   header: { gap: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.lg },
   topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   block: { gap: spacing.md },
@@ -297,7 +364,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   collectionSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
-  collectionImage: { width: "100%", aspectRatio: 1, borderRadius: radius.md, marginBottom: spacing.sm },
+  collectionImage: { width: "100%", aspectRatio: 4 / 5, borderRadius: radius.md, marginBottom: spacing.sm },
   collectionName: { paddingHorizontal: 2 },
   pending: {
     flexDirection: "row",
