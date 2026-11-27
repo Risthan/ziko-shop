@@ -1,7 +1,11 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Animated, { FadeInDown, ZoomIn } from "react-native-reanimated";
 import type { Product } from "@/api/types";
+import { cart } from "@/lib/cart/useCart";
 import { formatCdf, splitProductName } from "@/lib/format";
+import { haptics } from "@/lib/haptics";
 import { colors, motion, radius, spacing } from "@/theme";
 import { AppText } from "./AppText";
 import { StockBadge } from "./Badges";
@@ -19,10 +23,27 @@ interface Props {
   onPress: () => void;
 }
 
-/** Carte produit de la grille (2 par ligne sur téléphone). Apparition en cascade. */
+/**
+ * Carte produit de la grille (2 par ligne sur téléphone). Apparition en cascade.
+ * Le petit bouton « + » ajoute le pull au panier sans ouvrir la fiche : c'est la
+ * deuxième façon d'ajouter au panier (la première est sur la fiche produit).
+ */
 export function ProductCard({ product, width, modelColors, index, onPress }: Props) {
   const { model, color } = splitProductName(product.name);
   const soldOut = product.stock <= 0;
+  const [added, setAdded] = useState(false);
+
+  useEffect(() => {
+    if (!added) return;
+    const timer = setTimeout(() => setAdded(false), 1400);
+    return () => clearTimeout(timer);
+  }, [added]);
+
+  const quickAdd = () => {
+    cart.add(product.id, 1, product.stock);
+    haptics.success();
+    setAdded(true);
+  };
 
   return (
     <Animated.View entering={FadeInDown.delay(Math.min(index, 8) * motion.stagger).duration(motion.slow)} style={{ width }}>
@@ -32,7 +53,23 @@ export function ProductCard({ product, width, modelColors, index, onPress }: Pro
         accessibilityRole="button"
         accessibilityLabel={`${product.name}, ${formatCdf(product.priceCdf)}, ${soldOut ? "épuisé" : `${product.stock} en stock`}`}
       >
-        <ProductImage path={product.imageUrl} name={product.name} fit="cover" style={[styles.image, soldOut && styles.soldOut]} />
+        <View>
+          <ProductImage path={product.imageUrl} name={product.name} fit="cover" style={[styles.image, soldOut && styles.soldOut]} />
+          {soldOut ? null : (
+            <PressableScale
+              haptic={false}
+              onPress={quickAdd}
+              hitSlop={8}
+              style={[styles.quickAdd, added && styles.quickAdded]}
+              accessibilityRole="button"
+              accessibilityLabel={added ? `${product.name} ajouté au panier` : `Ajouter ${product.name} au panier`}
+            >
+              <Animated.View key={added ? "ok" : "add"} entering={ZoomIn.duration(motion.fast)}>
+                <Ionicons name={added ? "checkmark" : "add"} size={22} color={added ? colors.onAccent : colors.text} />
+              </Animated.View>
+            </PressableScale>
+          )}
+        </View>
         <View style={styles.info}>
           <View style={styles.titleRow}>
             <AppText variant="h3" numberOfLines={1} style={styles.name}>
@@ -79,6 +116,20 @@ const styles = StyleSheet.create({
   },
   image: { width: "100%", aspectRatio: 1, borderRadius: radius.md },
   soldOut: { opacity: 0.4 },
+  quickAdd: {
+    position: "absolute",
+    right: spacing.sm,
+    bottom: spacing.sm,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.overlay,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  quickAdded: { backgroundColor: colors.accent, borderColor: colors.accent },
   info: { paddingHorizontal: spacing.xs, paddingBottom: spacing.xs, gap: 6 },
   titleRow: { flexDirection: "row", alignItems: "center" },
   name: { flex: 1 },
