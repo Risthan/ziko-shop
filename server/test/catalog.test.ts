@@ -18,6 +18,7 @@ beforeEach(async () => {
 });
 
 const migration008 = () => readFile(new URL("../src/db/migrations/008_collection_15_pulls.sql", import.meta.url), "utf8");
+const migration009 = () => readFile(new URL("../src/db/migrations/009_collection_display_order.sql", import.meta.url), "utf8");
 
 async function catalog() {
   const { rows } = await db.query<{ id: string; name: string; image_url: string }>(
@@ -58,6 +59,25 @@ describe("Collection de 15 pulls", () => {
     expect(after.slice(0, 9).map((product) => product.id)).toEqual(before.map((product) => product.id));
     expect(after.every((product) => product.image_url.endsWith("-v4.jpg"))).toBe(true);
     expect(after.map((product) => product.name).sort()).toEqual(SEED_PRODUCTS.map((product) => product.name).sort());
+  });
+
+  it("la migration 009 range la boutique en ligne dans l'ordre de la collection ; un produit ajouté ensuite reste après", async () => {
+    const original = SEED_PRODUCTS.filter((product) => !/Bleu roi|Rouge/.test(product.name));
+    for (const product of original) {
+      await db.query("INSERT INTO products (name, price_cdf, stock, image_url) VALUES ($1, $2, $3, $4)", [
+        product.name,
+        product.priceCdf,
+        product.stock,
+        product.imageUrl.replace("-v4", "-v3"),
+      ]);
+    }
+    await db.query(await migration008());
+    await db.query("INSERT INTO products (name, price_cdf, stock, created_at) VALUES ('Édition limitée — Vert', 99000, 3, now() + interval '1 hour')");
+
+    await db.query(await migration009());
+
+    const names = (await catalog()).map((product) => product.name);
+    expect(names).toEqual([...SEED_PRODUCTS.map((product) => product.name), "Édition limitée — Vert"]);
   });
 
   it("sur une base vide, la migration 008 n'ajoute rien : c'est le seed qui s'en charge", async () => {
