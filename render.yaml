@@ -20,10 +20,8 @@ services:
         generateValue: true
       - key: SEED_ON_START
         value: "true"
-      # Facultatif : l'une OU l'autre active l'essayage en direct (voir le README).
-      - key: DECART_API_KEY
-        sync: false
-      - key: ANYWEAR_DOMAIN
+      # Facultatif : active l'essayage en direct via Fal.ai (voir le README).
+      - key: FAL_KEY
         sync: false
 
 databases:

@@ -28,16 +28,12 @@ const envSchema = z.object({
   SEED_ON_START: booleanFromEnv,
   /** Origines autorisées pour CORS, séparées par des virgules ("*" = toutes). */
   CORS_ORIGINS: z.string().default("*"),
-  /** Clé de l'API temps réel Decart pour l'essayage en direct (facultative). */
-  DECART_API_KEY: z.string().default(""),
   /**
-   * Autre option d'essayage : le widget AnyWear de Decart, activé pour ce
-   * domaine sur anywear.decart.ai/install (ex. ziko-shop-api.onrender.com).
+   * Clé Fal.ai (https://fal.ai/dashboard/keys) pour l'essayage en direct
+   * (modèle Lucy VTON Realtime). Facultative : sans elle, l'essayage est
+   * simplement désactivé. Elle ne quitte jamais le serveur.
    */
-  ANYWEAR_DOMAIN: z
-    .string()
-    .regex(/^$|^[a-z0-9.-]+\.[a-z]{2,}$/i, "ANYWEAR_DOMAIN doit être un nom de domaine, sans https://")
-    .default(""),
+  FAL_KEY: z.string().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -1,6 +1,5 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDecartClient } from "@decartai/sdk";
 import express, { Router } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
@@ -9,51 +8,75 @@ import { AppError } from "../http/errors.js";
 /**
  * ESSAYAGE EN DIRECT (fonctionnalité facultative, isolée du reste de l'API).
  *
- * Deux façons de l'activer, au choix :
- * 1. DECART_API_KEY : notre page filme le client et le modèle temps réel
- *    « lucy-vton » de Decart lui fait porter le pull, en vidéo.
- *    La clé ne quitte jamais le serveur : le navigateur reçoit un jeton
- *    temporaire (60 s pour démarrer), limité à ce modèle, à l'origine de la
- *    page et à une séance de 45 s maximum (maîtrise des coûts).
- * 2. ANYWEAR_DOMAIN : la page charge le widget officiel AnyWear, qui ajoute
- *    son bouton « Try-On » sur la photo du pull (domaine à faire activer
- *    sur anywear.decart.ai/install).
- * Sans aucune des deux, l'app n'affiche pas le bouton.
+ * Fournisseur unique : Fal.ai, modèle « Lucy VTON Realtime »
+ * (https://fal.ai/models/decart/lucy2-vton/realtime/api).
+ *
+ * - La page /essayage filme le client (caméra frontale) et envoie la vidéo au
+ *   modèle en WebRTC ; elle reçoit en retour la vidéo où il porte le pull.
+ *   Le SDK officiel `@fal-ai/client` gère la connexion (WebSocket de
+ *   signalisation + WebRTC).
+ * - La clé FAL_KEY ne quitte JAMAIS le serveur : la page reçoit un jeton
+ *   temporaire (POST /try-on/token), valable 2 minutes pour ouvrir une
+ *   séance, et limité à ce seul modèle.
+ * - Coût maîtrisé : Fal facture la seconde de vidéo produite, donc une
+ *   séance dure au plus MAX_SESSION_SECONDS et les jetons sont limités par
+ *   adresse IP.
+ *
+ * Sans FAL_KEY, l'essayage est désactivé et l'app propose simplement de commander.
  */
-export const MAX_SESSION_SECONDS = 45;
-const MODEL = "lucy-vton-latest";
+export const FAL_ENDPOINT = "decart/lucy2-vton/realtime";
+/** Nom de l'app autorisée dans le jeton Fal (l'identifiant sans le propriétaire ni le chemin). */
+const FAL_APP_ALIAS = "lucy2-vton";
+const FAL_TOKEN_URL = "https://rest.fal.ai/tokens/";
+const TOKEN_EXPIRATION_SECONDS = 120;
+export const MAX_SESSION_SECONDS = 60;
 
 const PAGE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../public/essayage");
 
-/** Widget officiel AnyWear (Decart) : script tiers, chargé uniquement sur /essayage. */
-const ANYWEAR_ORIGIN = "https://anywear.decart.ai";
+export type TryOnMode = "fal" | "off";
 
-export type TryOnMode = "decart" | "anywear" | "off";
-
-export function tryOnMode(decartApiKey: string, anywearDomain: string): TryOnMode {
-  if (decartApiKey) return "decart";
-  if (anywearDomain) return "anywear";
-  return "off";
+export function tryOnMode(falKey: string): TryOnMode {
+  return falKey ? "fal" : "off";
 }
 
-export function tryOnRouter(decartApiKey: string, anywearDomain = ""): Router {
-  const router = Router();
-  const mode = tryOnMode(decartApiKey, anywearDomain);
-  const widget = mode === "anywear";
+/** Demande à Fal un jeton temporaire, limité au modèle d'essayage. */
+export async function createFalToken(falKey: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const response = await fetchImpl(FAL_TOKEN_URL, {
+    method: "POST",
+    headers: { Authorization: `Key ${falKey}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ allowed_apps: [FAL_APP_ALIAS], token_expiration: TOKEN_EXPIRATION_SECONDS }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Fal a refusé la création du jeton (HTTP ${response.status})`);
+  }
+  const token: unknown = await response.json();
+  // Fal renvoie le jeton sous forme de chaîne JSON.
+  if (typeof token === "string" && token.length > 0) return token;
+  if (token && typeof token === "object" && typeof (token as { detail?: unknown }).detail === "string") {
+    return (token as { detail: string }).detail;
+  }
+  throw new Error("Réponse inattendue de Fal pour le jeton");
+}
 
-  // La page charge son script, accède à la caméra et parle au service d'essayage :
-  // on n'ouvre que le strict nécessaire, pour cette page seulement. Le widget
-  // AnyWear (s'il est activé) a besoin de son propre script, styles et cadre.
+export function tryOnRouter(falKey: string, fetchImpl: typeof fetch = fetch): Router {
+  const router = Router();
+  const mode = tryOnMode(falKey);
+
+  // La page charge son script, accède à la caméra et parle à Fal : on n'ouvre
+  // que le strict nécessaire, pour cette page seulement.
   const pageSecurity = helmet.contentSecurityPolicy({
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: widget ? ["'self'", ANYWEAR_ORIGIN] : ["'self'"],
-      styleSrc: ["'self'", "https://fonts.googleapis.com", ...(widget ? ["'unsafe-inline'", ANYWEAR_ORIGIN] : [])],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", ...(widget ? ["https:"] : [])],
-      imgSrc: ["'self'", "data:", "blob:", ...(widget ? ["https:"] : [])],
-      mediaSrc: ["'self'", "blob:", ...(widget ? ["https:"] : [])],
-      connectSrc: ["'self'", "https:", "wss:"],
-      frameSrc: widget ? [ANYWEAR_ORIGIN, "https://*.decart.ai"] : ["'none'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      mediaSrc: ["'self'", "blob:", "mediastream:"],
+      // Le jeton vient de notre API ; la signalisation passe par le WebSocket de Fal.
+      connectSrc: ["'self'", "wss://fal.run", "https://fal.run"],
+      frameSrc: ["'none'"],
+      // L'app mobile affiche la page dans une WebView (pas un cadre) : aucun site ne peut l'intégrer.
       frameAncestors: ["'none'"],
     },
   });
@@ -61,24 +84,17 @@ export function tryOnRouter(decartApiKey: string, anywearDomain = ""): Router {
     "/essayage",
     pageSecurity,
     (_req, res, next) => {
-      res.set("Permissions-Policy", widget ? `camera=(self "${ANYWEAR_ORIGIN}"), microphone=()` : "camera=(self), microphone=()");
-      // AnyWear n'autorise l'affichage de sa fenêtre (frame-ancestors) que pour le
-      // site qui l'intègre, d'après l'en-tête Referer. helmet envoie « no-referrer »
-      // par défaut, ce qui bloquerait le widget : sur cette page, on transmet
-      // l'origine (et seulement l'origine) aux sites tiers.
-      res.set("Referrer-Policy", "strict-origin-when-cross-origin");
+      res.set("Permissions-Policy", "camera=(self), microphone=()");
       next();
     },
-    express.static(PAGE_DIR, { maxAge: "1h" }),
+    // Revalidée à chaque ouverture (ETag) : une mise à jour de la page arrive
+    // tout de suite dans l'app, sans attendre l'expiration d'un cache.
+    express.static(PAGE_DIR, { maxAge: 0 }),
   );
 
-  // La page demande quel mode d'essayage utiliser.
+  // La page (et l'app) demandent si l'essayage est disponible.
   router.get("/try-on/config", (_req, res) => {
-    res.json(
-      mode === "anywear"
-        ? { mode, widgetUrl: `${ANYWEAR_ORIGIN}/widget/latest/anywear.js?domain=${encodeURIComponent(anywearDomain)}` }
-        : { mode, maxSessionSeconds: MAX_SESSION_SECONDS },
-    );
+    res.json(mode === "fal" ? { mode, maxSessionSeconds: MAX_SESSION_SECONDS } : { mode });
   });
 
   const tokenLimiter = rateLimit({
@@ -91,24 +107,20 @@ export function tryOnRouter(decartApiKey: string, anywearDomain = ""): Router {
     },
   });
 
-  router.post("/try-on/token", tokenLimiter, async (req, res) => {
-    if (!decartApiKey) {
+  // Jeton temporaire pour ouvrir UNE séance. Renvoyé en texte brut : c'est le
+  // format attendu par le `tokenProvider` du SDK Fal.
+  router.post("/try-on/token", tokenLimiter, async (_req, res) => {
+    if (!falKey) {
       throw new AppError(503, "FEATURE_DISABLED", "L'essayage en direct n'est pas activé sur ce serveur.");
     }
-    const origin = `${req.protocol}://${req.get("host")}`;
+    let token: string;
     try {
-      const client = createDecartClient({ apiKey: decartApiKey });
-      const token = await client.tokens.create({
-        expiresIn: 60,
-        allowedModels: [MODEL],
-        allowedOrigins: [origin],
-        constraints: { realtime: { maxSessionDuration: MAX_SESSION_SECONDS } },
-      });
-      res.json({ apiKey: token.apiKey, expiresAt: token.expiresAt, model: MODEL, maxSessionSeconds: MAX_SESSION_SECONDS });
+      token = await createFalToken(falKey, fetchImpl);
     } catch (error) {
-      console.error("Decart tokens.create a échoué", error);
+      console.error("Jeton Fal impossible à créer :", error instanceof Error ? error.message : error);
       throw new AppError(502, "UPSTREAM_ERROR", "Le service d'essayage est momentanément indisponible.");
     }
+    res.set("Cache-Control", "no-store").type("text/plain").send(token);
   });
 
   return router;

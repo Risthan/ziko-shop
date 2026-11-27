@@ -22,8 +22,7 @@ export function startApp(db: Db): Server {
     NODE_ENV: "test",
     ADMIN_API_KEY: ADMIN_KEY,
     CORS_ORIGINS: "*",
-    DECART_API_KEY: "",
-    ANYWEAR_DOMAIN: "",
+    FAL_KEY: "",
   });
   return app.listen(0);
 }

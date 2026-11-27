@@ -14,7 +14,7 @@ import { tryOnRouter } from "./tryon/tryon.routes.js";
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 
-export type AppConfig = Pick<Config, "NODE_ENV" | "ADMIN_API_KEY" | "CORS_ORIGINS" | "DECART_API_KEY" | "ANYWEAR_DOMAIN">;
+export type AppConfig = Pick<Config, "NODE_ENV" | "ADMIN_API_KEY" | "CORS_ORIGINS" | "FAL_KEY">;
 
 export function createApp(db: Db, config: AppConfig): express.Express {
   const app = express();
@@ -62,13 +62,13 @@ export function createApp(db: Db, config: AppConfig): express.Express {
 
   // Fonctionnalités facultatives activées sur ce serveur (l'app adapte son interface).
   app.get("/features", (_req, res) => {
-    res.json({ liveTryOn: config.DECART_API_KEY.length > 0 || config.ANYWEAR_DOMAIN.length > 0 });
+    res.json({ liveTryOn: config.FAL_KEY.length > 0 });
   });
 
   app.use("/products", productsRouter(db, config.ADMIN_API_KEY));
   app.use("/orders", ordersRouter(db));
   // Facultatif et isolé : essayage en direct (voir src/tryon).
-  app.use(tryOnRouter(config.DECART_API_KEY, config.ANYWEAR_DOMAIN));
+  app.use(tryOnRouter(config.FAL_KEY));
 
   app.use(notFoundHandler);
   app.use(errorHandler);
