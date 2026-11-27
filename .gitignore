@@ -26,3 +26,4 @@ android/
 *.key
 *.mobileprovision
 server/public/essayage/app.js
+server/public/admin/app.js

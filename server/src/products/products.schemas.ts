@@ -30,6 +30,12 @@ export const createProductSchema = z.object({
 
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 
+/** Modifier un produit : seulement les champs envoyés (nom, prix, stock, image). */
+export const updateProductSchema = createProductSchema
+  .partial()
+  .refine((value) => Object.values(value).some((field) => field !== undefined), "Aucune modification à enregistrer.");
+export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+
 export const listProductsQuerySchema = z.object({
   search: z.string().trim().max(60, "La recherche ne doit pas dépasser 60 caractères.").optional(),
 });

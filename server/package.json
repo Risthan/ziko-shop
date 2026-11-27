@@ -16,7 +16,7 @@
     "seed": "tsx scripts/seed.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "test": "vitest run",
-    "build:web": "esbuild web/essayage/app.ts --bundle --format=esm --minify --target=es2020 --outfile=public/essayage/app.js"
+    "build:web": "esbuild web/essayage/app.ts web/admin/app.ts --bundle --format=esm --minify --target=es2020 --outdir=public --outbase=web"
   },
   "dependencies": {
     "@fal-ai/client": "1.11.0",

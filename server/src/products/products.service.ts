@@ -1,6 +1,7 @@
 import type { Db } from "../db/pool.js";
 import { errors } from "../http/errors.js";
-import type { CreateProductInput } from "./products.schemas.js";
+import { SEED_PRODUCTS } from "../db/seed.js";
+import type { CreateProductInput, UpdateProductInput } from "./products.schemas.js";
 
 export interface Product {
   id: string;
@@ -58,6 +59,40 @@ export async function listProducts(db: Db, search?: string): Promise<Product[]> 
       )
     : await db.query<ProductRow>(`SELECT ${COLUMNS} FROM products ORDER BY created_at, name`);
   return result.rows.map(toProduct);
+}
+
+/**
+ * Modifier un produit (prix, stock, nom, image). Les commandes déjà passées ne
+ * changent pas : elles ont gardé le prix du moment où elles ont été créées.
+ */
+export async function updateProduct(db: Db, id: string, input: UpdateProductInput): Promise<Product> {
+  const result = await db.query<ProductRow>(
+    `UPDATE products SET
+       name = COALESCE($2, name),
+       price_cdf = COALESCE($3, price_cdf),
+       stock = COALESCE($4, stock),
+       image_url = COALESCE($5, image_url)
+     WHERE id = $1
+     RETURNING ${COLUMNS}`,
+    [id, input.name ?? null, input.priceCdf ?? null, input.stock ?? null, input.imageUrl ?? null],
+  );
+  const row = result.rows[0];
+  if (!row) throw errors.productNotFound();
+  return toProduct(row);
+}
+
+/**
+ * Remet le stock des 9 pulls de la collection à leurs quantités de départ
+ * (celles de seed.ts). Les autres produits et les commandes ne bougent pas.
+ */
+export async function resetCollectionStock(db: Db): Promise<number> {
+  const result = await db.query(
+    `UPDATE products AS p SET stock = initial.stock
+     FROM unnest($1::text[], $2::int[]) AS initial (name, stock)
+     WHERE p.name = initial.name`,
+    [SEED_PRODUCTS.map((product) => product.name), SEED_PRODUCTS.map((product) => product.stock)],
+  );
+  return result.rowCount ?? 0;
 }
 
 export async function getProduct(db: Db, id: string): Promise<Product> {

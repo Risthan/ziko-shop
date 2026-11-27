@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { ErrorRequestHandler, RequestHandler } from "express";
+import rateLimit from "express-rate-limit";
 import { ZodError } from "zod";
 import { AppError } from "./errors.js";
 import { formatZodError } from "./validation.js";
@@ -18,6 +19,22 @@ export function requireAdminKey(adminKey: string): RequestHandler {
     }
     next();
   };
+}
+
+/**
+ * Routes d'administration : 60 requêtes par quart d'heure et par IP. Rend
+ * inutile toute tentative de deviner la clé (256 bits) par essais répétés.
+ */
+export function adminLimiter(): RequestHandler {
+  return rateLimit({
+    windowMs: 15 * 60_000,
+    limit: 60,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ error: { code: "RATE_LIMITED", message: "Trop de requêtes d'administration. Patientez quelques minutes." } });
+    },
+  });
 }
 
 export const notFoundHandler: RequestHandler = (req, _res, next) => {
