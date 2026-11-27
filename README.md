@@ -4,7 +4,7 @@
 
 Test technique « Développeur fullstack » pour Ziko : une **API** (Node.js, Express, TypeScript, PostgreSQL) qui gère des produits, des commandes et leur paiement, et une **app mobile** (React Native, Expo, TypeScript) branchée dessus.
 
-Ziko Shop vend trois modèles de pulls (Le Classique, L'Essentiel, Le Signature), chacun en trois couleurs : Noir, Crème et Moka. Cela fait 9 produits, avec des prix en francs congolais. L'objectif est double : une app qui donne l'impression d'être déjà commercialisée, et, derrière, **un paiement qui ne débite jamais deux fois**, même quand le réseau coupe ou que les requêtes arrivent en même temps.
+Ziko Shop vend trois modèles de pulls : Le Classique (sweat col rond), L'Essentiel (hoodie) et Le Signature (pull demi-zip), chacun en cinq couleurs : Noir, Crème, Moka, Bleu roi et Rouge. Cela fait 15 produits, avec des prix en francs congolais. L'objectif est double : une app qui donne l'impression d'être déjà commercialisée, et, derrière, **un paiement qui ne débite jamais deux fois**, même quand le réseau coupe ou que les requêtes arrivent en même temps.
 
 | | Lien |
 |---|---|
@@ -49,7 +49,7 @@ Prérequis : **Node.js 22 ou plus** (24 recommandé) et npm. Docker est facultat
 docker compose up --build
 ```
 
-L'API répond sur http://localhost:3000, avec PostgreSQL et les 9 pulls déjà en boutique.
+L'API répond sur http://localhost:3000, avec PostgreSQL et les 15 pulls déjà en boutique.
 
 ### Le serveur, sans Docker
 
@@ -66,7 +66,7 @@ npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ### Les tests
 
 ```bash
-cd server && npm test      # 97 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes et administration compris)
+cd server && npm test      # 100 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes et administration compris)
 cd mobile && npm test      # 22 tests : paiement côté app (coupures, réouverture, double clic), panier, formatage
 ```
 
@@ -101,7 +101,7 @@ L'app n'utilise que des modules inclus dans Expo Go. Elle est publiée avec `run
 | `DATABASE_URL` | Connexion PostgreSQL (obligatoire). |
 | `DATABASE_SSL` | `true` pour une base distante en TLS (le certificat est vérifié). |
 | `ADMIN_API_KEY` | Clé d'administration : créer ou modifier un produit, page `/admin`. Au moins 16 caractères, obligatoire en production. |
-| `SEED_ON_START` | `true` : ajoute les 9 pulls si la boutique est vide. |
+| `SEED_ON_START` | `true` : ajoute les 15 pulls si la boutique est vide. |
 | `CORS_ORIGINS` | Origines autorisées (`*` par défaut). |
 | `IKAWN_API_KEY` | Facultative : clé iKawn Mirror qui active l'essayage en direct (voir § 5). |
 
@@ -113,7 +113,7 @@ Ouvrez **https://ziko-shop-api.onrender.com/admin/** et entrez la clé `ADMIN_AP
 - modifier le nom, la photo, le prix ou le stock de chaque pull. Les commandes déjà passées gardent leur prix ;
 - supprimer un pull : il est effacé s'il n'a jamais été commandé. Sinon, il est seulement **retiré de la vente**, pour que les commandes passées restent intactes, et on peut le remettre en vente ;
 - ajouter un pull, nommé « Modèle — Couleur » pour que l'app regroupe les couleurs ;
-- remettre le stock des 9 pulls à l'état de départ, par exemple après une démonstration ;
+- remettre le stock des 15 pulls à l'état de départ, par exemple après une démonstration ;
 - voir les dernières commandes.
 
 La clé reste dans l'onglet du navigateur : fermer l'onglet déconnecte. Les mêmes actions existent dans l'API (`PATCH /products/:id`, `DELETE /products/:id`, `POST /products/:id/restore`, `POST /admin/reset-stock`, `GET /admin/products`, `GET /admin/summary`), avec l'en-tête `X-Admin-Key`.
@@ -401,7 +401,7 @@ Durée : 3 à 4 minutes. On filme l'écran du téléphone, avec Expo Go et l'app
 
 Comme le sujet l'autorise, j'ai utilisé un assistant IA (Claude, d'Anthropic) comme outil de développement.
 
-- **Écrit par l'IA, à partir de mes consignes :** la grande majorité du code (serveur, app, tests), la configuration Docker, Render, EAS et CI, et ce README. Les visuels des produits et de la bannière ont été générés avec l'outil d'images FLORA, à partir du logo que j'ai fourni. Les photos des 9 pulls sont en 4K (3584 × 4800, JPEG d'environ 0,6 à 1 Mo) : la boutique et l'essayage en direct, qui les envoie à iKawn comme référence, restent nets.
+- **Écrit par l'IA, à partir de mes consignes :** la grande majorité du code (serveur, app, tests), la configuration Docker, Render, EAS et CI, et ce README. La bannière a été générée avec l'outil d'images FLORA, à partir du logo que j'ai fourni. Les photos des 15 pulls sont celles que j'ai choisies : fond clair, format 3:4 (1440 × 1920, JPEG de 100 à 270 Ko). Le pull se détache bien du fond, ce qui aide l'essayage en direct, qui envoie la photo à iKawn comme référence ; et les fichiers légers chargent vite.
 - **Fait par moi :**
   - le choix du produit et de la direction artistique : boutique de 3 pulls, prix en francs congolais, maquettes « Premium Dark Commerce », logo Ziko Shop, essayage en direct inspiré d'une vidéo que j'ai repérée ;
   - la validation des visuels et des écrans à chaque étape ;
@@ -423,7 +423,7 @@ server/                     API Node.js + Express + TypeScript
     orders/                 commandes et paiement (orders.service.ts : le cœur)
     http/                   erreurs, middlewares, validation
     tryon/                  essayage en direct (facultatif)
-  test/                     97 tests (Vitest + Supertest + vrai PostgreSQL)
+  test/                     100 tests (Vitest + Supertest + vrai PostgreSQL)
   web/essayage/             script de la page d'essayage (compilé par esbuild)
   public/                   photos des pulls, page /essayage
 mobile/                     app Expo (React Native + TypeScript)

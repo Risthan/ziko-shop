@@ -33,7 +33,7 @@ export interface ModelGroup {
   variants: Product[];
 }
 
-/** Regroupe les produits de l'API par modèle (« Le Classique — Noir / Crème / Moka »). */
+/** Regroupe les produits de l'API par modèle (« Le Classique — Noir / Crème / Moka / Bleu roi / Rouge »). */
 export function groupByModel(products: Product[]): ModelGroup[] {
   const groups = new Map<string, Product[]>();
   for (const product of products) {

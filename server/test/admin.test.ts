@@ -111,8 +111,8 @@ describe("Supprimer ou retirer un produit (administration)", () => {
     const res = await request(server)
       .patch(`/products/${product.id}`)
       .set(admin)
-      .send({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v3.jpg" });
-    expect(res.body.product).toMatchObject({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v3.jpg" });
+      .send({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v4.jpg" });
+    expect(res.body.product).toMatchObject({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v4.jpg" });
   });
 });
 
@@ -122,7 +122,7 @@ describe("Espace administration", () => {
     expect((await request(server).get("/admin/session").set(admin)).body).toEqual({ ok: true });
   });
 
-  it("remet le stock des 9 pulls à l'état de départ, sans toucher aux autres produits", async () => {
+  it("remet le stock des pulls de la collection à l'état de départ, sans toucher aux autres produits", async () => {
     const first = SEED_PRODUCTS[0];
     const collection = await insertProduct(db, { name: first.name, stock: 1 });
     const other = await insertProduct(db, { name: "Édition limitée — Bleu", stock: 4 });

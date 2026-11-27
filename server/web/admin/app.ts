@@ -230,7 +230,7 @@ function renderProducts() {
 
 
 $("reset-stock").addEventListener("click", async () => {
-  if (!confirm("Remettre le stock des 9 pulls à l'état de départ (12, 9, 6, 10, 4, 7, 5, 3, 2) ? Les commandes ne sont pas touchées.")) return;
+  if (!confirm("Remettre le stock des 15 pulls de la collection à l'état de départ ? Les commandes ne sont pas touchées.")) return;
   try {
     const { updated, products: fresh } = await api<{ updated: number; products: AdminProduct[] }>("/admin/reset-stock", { method: "POST" });
     products = fresh;
