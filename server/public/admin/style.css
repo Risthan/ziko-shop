@@ -234,6 +234,41 @@ select:focus {
 .row.order {
   grid-template-columns: 1.2fr 1.4fr 0.8fr 1fr;
 }
+.row.editable {
+  grid-template-columns: 64px 2fr 1fr 0.8fr auto;
+  align-items: end;
+}
+.row.editable img {
+  width: 64px;
+  height: 64px;
+  align-self: center;
+}
+.row .name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.row .actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.row.archived {
+  grid-template-columns: 52px 1fr auto;
+}
+.row.archived img {
+  opacity: 0.5;
+}
+.archived-block {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+h3 {
+  font-size: 15px;
+  font-weight: 800;
+  margin: 0 0 4px;
+}
 .badge {
   font-size: 12px;
   font-weight: 700;
@@ -275,7 +310,26 @@ select:focus {
   .row .stock-field {
     grid-column: 3;
   }
-  .row .save {
+  .row .save,
+  .row .actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+  }
+  .row .actions .button {
+    flex: 1;
+  }
+  .row.editable {
+    grid-template-columns: 56px 1fr 1fr;
+  }
+  .row.editable img {
+    width: 56px;
+    height: 56px;
+    align-self: start;
+  }
+  .row.archived {
+    grid-template-columns: 48px 1fr;
+  }
+  .row.archived .button {
     grid-column: 1 / -1;
   }
   .row.order {

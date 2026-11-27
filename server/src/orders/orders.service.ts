@@ -146,7 +146,7 @@ export async function createOrder(
 
   const ids = input.items.map((item) => item.productId);
   const found = await db.query<{ id: string; name: string; price_cdf: number; stock: number }>(
-    "SELECT id, name, price_cdf, stock FROM products WHERE id = ANY($1::uuid[])",
+    "SELECT id, name, price_cdf, stock FROM products WHERE id = ANY($1::uuid[]) AND archived_at IS NULL",
     [ids],
   );
   const products = new Map(found.rows.map((row) => [row.id, row]));

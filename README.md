@@ -66,7 +66,7 @@ npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ### Les tests
 
 ```bash
-cd server && npm test      # 89 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes et administration compris)
+cd server && npm test      # 93 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes et administration compris)
 cd mobile && npm test      # 22 tests : paiement côté app (coupures, réouverture, double clic), panier, formatage
 ```
 
@@ -110,12 +110,13 @@ L'app n'utilise que des modules inclus dans Expo Go. Elle est publiée avec `run
 Ouvrez **https://ziko-shop-api.onrender.com/admin/** et entrez la clé `ADMIN_API_KEY`. Sur Render, elle se trouve dans **ziko-shop-api → Environment**. La page permet de :
 
 - voir les chiffres : commandes, commandes payées, chiffre d'affaires, comptes clients ;
-- modifier le prix ou le stock de chaque pull. Les commandes déjà passées gardent leur prix ;
+- modifier le nom, la photo, le prix ou le stock de chaque pull. Les commandes déjà passées gardent leur prix ;
+- supprimer un pull : il est effacé s'il n'a jamais été commandé. Sinon, il est seulement **retiré de la vente**, pour que les commandes passées restent intactes, et on peut le remettre en vente ;
 - ajouter un pull, nommé « Modèle — Couleur » pour que l'app regroupe les couleurs ;
 - remettre le stock des 9 pulls à l'état de départ, par exemple après une démonstration ;
 - voir les dernières commandes.
 
-La clé reste dans l'onglet du navigateur : fermer l'onglet déconnecte. Les mêmes actions existent dans l'API (`PATCH /products/:id`, `POST /admin/reset-stock`, `GET /admin/summary`), avec l'en-tête `X-Admin-Key`.
+La clé reste dans l'onglet du navigateur : fermer l'onglet déconnecte. Les mêmes actions existent dans l'API (`PATCH /products/:id`, `DELETE /products/:id`, `POST /products/:id/restore`, `POST /admin/reset-stock`, `GET /admin/products`, `GET /admin/summary`), avec l'en-tête `X-Admin-Key`.
 
 ### Déploiement
 
@@ -164,6 +165,7 @@ Toutes les réponses sont en JSON. Les erreurs ont toujours la même forme, avec
 |---|---|---|---|
 | 1 | `POST /products` | Créer un produit `{ name, priceCdf, stock, imageUrl? }`. Exige l'en-tête `X-Admin-Key`. | 201, 400, 401 |
 | | `PATCH /products/:id` | Modifier le prix, le stock, le nom ou la photo d'un produit (clé d'administration). | 200, 400, 401, 404 |
+| | `DELETE /products/:id`, `POST /products/:id/restore` | Supprimer un produit (effacé s'il n'a jamais été commandé, sinon retiré de la vente) ; le remettre en vente (clé d'administration). | 200, 401, 404 |
 | | `GET /admin/summary`, `POST /admin/reset-stock` | Chiffres de la boutique ; remise du stock à l'état de départ (clé d'administration). | 200, 401 |
 | 2 | `GET /products?search=` | Lister les produits (recherche facultative par nom). | 200 |
 | | `GET /products/:id` | Un produit. | 200, 404 |
@@ -419,7 +421,7 @@ server/                     API Node.js + Express + TypeScript
     orders/                 commandes et paiement (orders.service.ts : le cœur)
     http/                   erreurs, middlewares, validation
     tryon/                  essayage en direct (facultatif)
-  test/                     89 tests (Vitest + Supertest + vrai PostgreSQL)
+  test/                     93 tests (Vitest + Supertest + vrai PostgreSQL)
   web/essayage/             script de la page d'essayage (compilé par esbuild)
   public/                   photos des pulls, page /essayage
 mobile/                     app Expo (React Native + TypeScript)

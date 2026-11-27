@@ -38,12 +38,17 @@
           <div class="card-head">
             <div>
               <h2>Produits</h2>
-              <p class="muted">Modifiez le prix ou le stock, puis « Enregistrer ». Les commandes déjà passées gardent leur prix.</p>
+              <p class="muted">Modifiez le nom, la photo, le prix ou le stock, puis « Enregistrer ». Les commandes déjà passées gardent leur prix.</p>
             </div>
             <button id="reset-stock" class="button danger">Remettre le stock à l'état de départ</button>
           </div>
           <p id="products-message" class="message" role="status"></p>
           <div class="table" id="products"></div>
+          <div id="archived-block" class="archived-block" hidden>
+            <h3>Retirés de la vente</h3>
+            <p class="muted">Ces pulls avaient déjà été commandés : ils restent dans l'historique des commandes, mais n'apparaissent plus dans l'app.</p>
+            <div class="table" id="archived"></div>
+          </div>
         </div>
 
         <div class="card">

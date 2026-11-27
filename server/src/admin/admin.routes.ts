@@ -4,7 +4,7 @@ import express, { Router } from "express";
 import helmet from "helmet";
 import type { Db } from "../db/pool.js";
 import { adminLimiter, requireAdminKey } from "../http/middleware.js";
-import { listProducts, resetCollectionStock } from "../products/products.service.js";
+import { listProductsForAdmin, resetCollectionStock } from "../products/products.service.js";
 
 const PAGE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../public/admin");
 
@@ -13,11 +13,13 @@ const PAGE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
  *
  * - GET  /admin               la page (HTML) : on s'y connecte avec la clé ADMIN_API_KEY
  * - GET  /admin/session       vérifie la clé (en-tête X-Admin-Key)
+ * - GET  /admin/products      tous les produits, y compris ceux retirés de la vente
  * - GET  /admin/summary       chiffres de la boutique et dernières commandes
  * - POST /admin/reset-stock   remet le stock des 9 pulls à l'état de départ
  *
- * La modification et la création de produits passent par l'API produits
- * (PATCH /products/:id, POST /products), protégées par la même clé.
+ * Créer, modifier, supprimer ou remettre en vente un produit passe par l'API
+ * produits (POST /products, PATCH /products/:id, DELETE /products/:id,
+ * POST /products/:id/restore), protégée par la même clé.
  */
 export function adminRouter(db: Db, adminKey: string): Router {
   const router = Router();
@@ -46,6 +48,11 @@ export function adminRouter(db: Db, adminKey: string): Router {
   );
   router.get("/admin/session", ...admin, (_req, res) => {
     res.json({ ok: true });
+  });
+
+  // Tous les produits, y compris ceux retirés de la vente.
+  router.get("/admin/products", ...admin, async (_req, res) => {
+    res.json({ products: await listProductsForAdmin(db) });
   });
 
   router.get("/admin/summary", ...admin, async (_req, res) => {
@@ -81,7 +88,7 @@ export function adminRouter(db: Db, adminKey: string): Router {
 
   router.post("/admin/reset-stock", ...admin, async (_req, res) => {
     const updated = await resetCollectionStock(db);
-    res.json({ updated, products: await listProducts(db) });
+    res.json({ updated, products: await listProductsForAdmin(db) });
   });
 
   // La page elle-même (après les routes ci-dessus) : /admin redirige vers /admin/.

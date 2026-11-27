@@ -9,6 +9,10 @@ interface Product {
   stock: number;
   imageUrl: string | null;
 }
+interface AdminProduct extends Product {
+  archived: boolean;
+  orderCount: number;
+}
 interface Summary {
   totals: { orders: number; paid: number; revenue: number; customers: number };
   recentOrders: { id: string; totalCdf: number; status: "payee" | "en_attente"; createdAt: string; pieces: number; customer: string | null }[];
@@ -97,7 +101,7 @@ $("logout").addEventListener("click", () => {
 
 // --- Produits ---------------------------------------------------------------
 
-let products: Product[] = [];
+let products: AdminProduct[] = [];
 
 function say(id: string, text: string, ok = true) {
   const node = $(id);
@@ -106,55 +110,129 @@ function say(id: string, text: string, ok = true) {
 }
 
 async function loadProducts() {
-  products = (await api<{ products: Product[] }>("/products")).products;
+  products = (await api<{ products: AdminProduct[] }>("/admin/products")).products;
   renderProducts();
   renderImageChoices();
 }
 
-function renderProducts() {
-  $("products").replaceChildren(
-    ...products.map((product) => {
-      const price = el("input", { type: "number", min: "1", max: "10000000", step: "1", value: String(product.priceCdf) });
-      price.setAttribute("aria-label", `Prix de ${product.name} en FC`);
-      const stock = el("input", { type: "number", min: "0", max: "1000000", step: "1", value: String(product.stock) });
-      stock.setAttribute("aria-label", `Stock de ${product.name}`);
-      const save = el("button", { className: "button small save", textContent: "Enregistrer", type: "button" });
+/** Les photos déjà utilisées par la boutique (pour les choisir sans retaper d'adresse). */
+const knownImages = () => [...new Set(products.map((product) => product.imageUrl).filter((url): url is string => !!url))];
+const imageLabel = (url: string) => (url.startsWith("/images/") ? url.replace("/images/", "").replace(/\.\w+$/, "") : url);
 
-      save.addEventListener("click", async () => {
-        const changes: Partial<Product> = {};
-        if (Number(price.value) !== product.priceCdf) changes.priceCdf = Number(price.value);
-        if (Number(stock.value) !== product.stock) changes.stock = Number(stock.value);
-        if (Object.keys(changes).length === 0) return say("products-message", `Aucune modification pour « ${product.name} ».`);
-        save.disabled = true;
-        try {
-          const { product: updated } = await api<{ product: Product }>(`/products/${product.id}`, { method: "PATCH", body: changes });
-          products = products.map((item) => (item.id === updated.id ? updated : item));
-          renderProducts();
-          say("products-message", `« ${updated.name} » enregistré : ${formatCdf(updated.priceCdf)}, stock ${updated.stock}.`);
-        } catch (error) {
-          say("products-message", (error as Error).message, false);
-          save.disabled = false;
-        }
-      });
+function imageSelect(current: string | null) {
+  const select = el("select");
+  const choices = knownImages();
+  if (current && !choices.includes(current)) choices.unshift(current);
+  select.append(
+    ...choices.map((url) => el("option", { value: url, textContent: imageLabel(url), selected: url === current })),
+    el("option", { value: "custom", textContent: "Autre photo (adresse https://…)" }),
+  );
+  return select;
+}
 
-      const image = el("img", { src: product.imageUrl ?? "", alt: "" });
-      return el(
-        "div",
-        { className: "row" },
-        image,
-        el("div", { className: "name-cell" }, el("div", { className: "name", textContent: product.name }), el("div", { className: `sub ${product.stock <= 3 ? "low" : ""}`, textContent: `${formatCdf(product.priceCdf)} · stock ${product.stock}` })),
-        el("label", { className: "price-field" }, "Prix (FC)", price),
-        el("label", { className: "stock-field" }, "Stock", stock),
-        save,
-      );
-    }),
+function productRow(product: AdminProduct) {
+  const name = el("input", { type: "text", value: product.name, maxLength: 120, minLength: 2 });
+  name.setAttribute("aria-label", "Nom du produit");
+  const photo = imageSelect(product.imageUrl);
+  photo.setAttribute("aria-label", `Photo de ${product.name}`);
+  const price = el("input", { type: "number", min: "1", max: "10000000", step: "1", value: String(product.priceCdf) });
+  price.setAttribute("aria-label", `Prix de ${product.name} en FC`);
+  const stock = el("input", { type: "number", min: "0", max: "1000000", step: "1", value: String(product.stock) });
+  stock.setAttribute("aria-label", `Stock de ${product.name}`);
+  const image = el("img", { src: product.imageUrl ?? "", alt: "" });
+  const save = el("button", { className: "button small", textContent: "Enregistrer", type: "button" });
+  const remove = el("button", { className: "button small danger", textContent: "Supprimer", type: "button" });
+
+  // « Autre photo » : on demande l'adresse, et l'aperçu se met à jour.
+  photo.addEventListener("change", () => {
+    if (photo.value !== "custom") return void (image.src = photo.value);
+    const url = prompt("Adresse de la photo (https://…) :")?.trim();
+    if (url && url.startsWith("https://")) {
+      photo.prepend(el("option", { value: url, textContent: imageLabel(url), selected: true }));
+      image.src = url;
+    } else {
+      photo.value = product.imageUrl ?? "";
+      if (url) say("products-message", "La photo doit être une adresse https://…", false);
+    }
+  });
+
+  save.addEventListener("click", async () => {
+    const changes: Record<string, string | number> = {};
+    if (name.value.trim() !== product.name) changes.name = name.value.trim();
+    if (photo.value && photo.value !== "custom" && photo.value !== product.imageUrl) changes.imageUrl = photo.value;
+    if (Number(price.value) !== product.priceCdf) changes.priceCdf = Number(price.value);
+    if (Number(stock.value) !== product.stock) changes.stock = Number(stock.value);
+    if (Object.keys(changes).length === 0) return say("products-message", `Aucune modification pour « ${product.name} ».`);
+    save.disabled = true;
+    try {
+      const { product: updated } = await api<{ product: Product }>(`/products/${product.id}`, { method: "PATCH", body: changes });
+      await loadProducts();
+      say("products-message", `« ${updated.name} » enregistré : ${formatCdf(updated.priceCdf)}, stock ${updated.stock}.`);
+    } catch (error) {
+      say("products-message", (error as Error).message, false);
+      save.disabled = false;
+    }
+  });
+
+  remove.addEventListener("click", async () => {
+    const warning =
+      product.orderCount > 0
+        ? `« ${product.name} » a déjà été commandé ${product.orderCount} fois : il sera retiré de la vente (invisible dans l'app), et les commandes passées resteront intactes. Continuer ?`
+        : `Supprimer définitivement « ${product.name} » ? Il n'a jamais été commandé.`;
+    if (!confirm(warning)) return;
+    try {
+      const { message } = await api<{ outcome: string; message: string }>(`/products/${product.id}`, { method: "DELETE" });
+      await loadProducts();
+      say("products-message", `« ${product.name} » : ${message}`);
+    } catch (error) {
+      say("products-message", (error as Error).message, false);
+    }
+  });
+
+  return el(
+    "div",
+    { className: "row editable" },
+    image,
+    el("div", { className: "name-cell" }, el("label", {}, "Nom", name), el("label", {}, "Photo", photo)),
+    el("label", { className: "price-field" }, "Prix (FC)", price),
+    el("label", { className: "stock-field" }, "Stock", stock),
+    el("div", { className: "actions" }, save, remove),
   );
 }
+
+function archivedRow(product: AdminProduct) {
+  const restore = el("button", { className: "button small", textContent: "Remettre en vente", type: "button" });
+  restore.addEventListener("click", async () => {
+    try {
+      await api(`/products/${product.id}/restore`, { method: "POST" });
+      await loadProducts();
+      say("products-message", `« ${product.name} » est de nouveau en vente.`);
+    } catch (error) {
+      say("products-message", (error as Error).message, false);
+    }
+  });
+  return el(
+    "div",
+    { className: "row archived" },
+    el("img", { src: product.imageUrl ?? "", alt: "" }),
+    el("div", { className: "name-cell" }, el("div", { className: "name", textContent: product.name }), el("div", { className: "sub", textContent: `Retiré de la vente · ${formatCdf(product.priceCdf)} · commandé ${product.orderCount} fois` })),
+    restore,
+  );
+}
+
+function renderProducts() {
+  const onSale = products.filter((product) => !product.archived);
+  const archived = products.filter((product) => product.archived);
+  $("products").replaceChildren(...onSale.map(productRow));
+  $("archived-block").hidden = archived.length === 0;
+  $("archived").replaceChildren(...archived.map(archivedRow));
+}
+
 
 $("reset-stock").addEventListener("click", async () => {
   if (!confirm("Remettre le stock des 9 pulls à l'état de départ (12, 9, 6, 10, 4, 7, 5, 3, 2) ? Les commandes ne sont pas touchées.")) return;
   try {
-    const { updated, products: fresh } = await api<{ updated: number; products: Product[] }>("/admin/reset-stock", { method: "POST" });
+    const { updated, products: fresh } = await api<{ updated: number; products: AdminProduct[] }>("/admin/reset-stock", { method: "POST" });
     products = fresh;
     renderProducts();
     say("products-message", `Stock remis à l'état de départ (${updated} produits).`);

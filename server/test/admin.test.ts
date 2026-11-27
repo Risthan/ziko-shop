@@ -64,6 +64,58 @@ describe("Modifier un produit (administration)", () => {
   });
 });
 
+describe("Supprimer ou retirer un produit (administration)", () => {
+  it("efface un produit jamais commandé ; refuse sans clé", async () => {
+    const product = await insertProduct(db, { name: "Essai — Bleu" });
+
+    expect((await request(server).delete(`/products/${product.id}`)).status).toBe(401);
+    const res = await request(server).delete(`/products/${product.id}`).set(admin);
+
+    expect(res.status).toBe(200);
+    expect(res.body.outcome).toBe("deleted");
+    const { rows } = await db.query("SELECT count(*)::int AS n FROM products WHERE id = $1", [product.id]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("un produit déjà commandé est retiré de la vente : invisible, impossible à commander, mais l'historique reste intact", async () => {
+    const product = await insertProduct(db, { name: "Le Classique — Noir", stock: 5 });
+    const order = await request(server).post("/orders").send({ productId: product.id, quantity: 1 });
+
+    const res = await request(server).delete(`/products/${product.id}`).set(admin);
+
+    expect(res.body.outcome).toBe("archived");
+    expect((await request(server).get("/products")).body.products).toEqual([]);
+    expect((await request(server).get(`/products/${product.id}`)).status).toBe(404);
+    const again = await request(server).post("/orders").send({ productId: product.id, quantity: 1 });
+    expect(again.status).toBe(404);
+    const history = await request(server).get(`/orders/${order.body.order.id}`);
+    expect(history.body.order.items[0].product.name).toBe("Le Classique — Noir");
+
+    const listed = await request(server).get("/admin/products").set(admin);
+    expect(listed.body.products[0]).toMatchObject({ id: product.id, archived: true, orderCount: 1 });
+  });
+
+  it("remet en vente un produit retiré", async () => {
+    const product = await insertProduct(db, { stock: 5 });
+    await request(server).post("/orders").send({ productId: product.id, quantity: 1 });
+    await request(server).delete(`/products/${product.id}`).set(admin);
+
+    const res = await request(server).post(`/products/${product.id}/restore`).set(admin);
+
+    expect(res.status).toBe(200);
+    expect((await request(server).get("/products")).body.products).toHaveLength(1);
+  });
+
+  it("modifie aussi le nom et la photo", async () => {
+    const product = await insertProduct(db);
+    const res = await request(server)
+      .patch(`/products/${product.id}`)
+      .set(admin)
+      .send({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v2.jpg" });
+    expect(res.body.product).toMatchObject({ name: "Le Classique — Bleu nuit", imageUrl: "/images/classique-noir-v2.jpg" });
+  });
+});
+
 describe("Espace administration", () => {
   it("vérifie la clé", async () => {
     expect((await request(server).get("/admin/session").set("X-Admin-Key", "mauvaise-cle-123456")).status).toBe(401);

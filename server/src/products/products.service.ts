@@ -19,9 +19,17 @@ interface ProductRow {
   stock: number;
   image_url: string | null;
   created_at: Date;
+  archived_at?: Date | null;
 }
 
 const COLUMNS = "id, name, price_cdf, stock, image_url, created_at";
+
+/** Vue administration : le produit, et s'il est retiré de la vente. */
+export interface AdminProduct extends Product {
+  archived: boolean;
+  /** Nombre de commandes qui contiennent ce produit. */
+  orderCount: number;
+}
 
 function toProduct(row: ProductRow): Product {
   return {
@@ -53,11 +61,11 @@ export async function listProducts(db: Db, search?: string): Promise<Product[]> 
   const result = search
     ? await db.query<ProductRow>(
         `SELECT ${COLUMNS} FROM products
-         WHERE name ILIKE $1 ESCAPE '\\'
+         WHERE archived_at IS NULL AND name ILIKE $1 ESCAPE '\\'
          ORDER BY created_at, name`,
         [`%${escapeLike(search)}%`],
       )
-    : await db.query<ProductRow>(`SELECT ${COLUMNS} FROM products ORDER BY created_at, name`);
+    : await db.query<ProductRow>(`SELECT ${COLUMNS} FROM products WHERE archived_at IS NULL ORDER BY created_at, name`);
   return result.rows.map(toProduct);
 }
 
@@ -95,8 +103,44 @@ export async function resetCollectionStock(db: Db): Promise<number> {
   return result.rowCount ?? 0;
 }
 
+/** Tous les produits, y compris ceux retirés de la vente (administration). */
+export async function listProductsForAdmin(db: Db): Promise<AdminProduct[]> {
+  const result = await db.query<ProductRow & { order_count: number }>(
+    `SELECT p.id, p.name, p.price_cdf, p.stock, p.image_url, p.created_at, p.archived_at,
+            (SELECT count(DISTINCT i.order_id)::int FROM order_items i WHERE i.product_id = p.id) AS order_count
+     FROM products p
+     ORDER BY p.archived_at NULLS FIRST, p.created_at, p.name`,
+  );
+  return result.rows.map((row) => ({ ...toProduct(row), archived: row.archived_at != null, orderCount: row.order_count }));
+}
+
+/**
+ * Supprimer un produit. Jamais commandé : il est effacé. Déjà commandé : il
+ * est seulement retiré de la vente, pour garder intactes les commandes
+ * passées (elles y font référence).
+ */
+export async function deleteProduct(db: Db, id: string): Promise<"deleted" | "archived"> {
+  const removed = await db.query(
+    "DELETE FROM products WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM order_items WHERE product_id = $1)",
+    [id],
+  );
+  if (removed.rowCount) return "deleted";
+  const archived = await db.query("UPDATE products SET archived_at = COALESCE(archived_at, now()) WHERE id = $1", [id]);
+  if (!archived.rowCount) throw errors.productNotFound();
+  return "archived";
+}
+
+/** Remettre en vente un produit retiré. */
+export async function restoreProduct(db: Db, id: string): Promise<Product> {
+  const result = await db.query<ProductRow>(`UPDATE products SET archived_at = NULL WHERE id = $1 RETURNING ${COLUMNS}`, [id]);
+  const row = result.rows[0];
+  if (!row) throw errors.productNotFound();
+  return toProduct(row);
+}
+
+/** Un produit en vente (un produit retiré « n'existe plus » pour les clients). */
 export async function getProduct(db: Db, id: string): Promise<Product> {
-  const result = await db.query<ProductRow>(`SELECT ${COLUMNS} FROM products WHERE id = $1`, [id]);
+  const result = await db.query<ProductRow>(`SELECT ${COLUMNS} FROM products WHERE id = $1 AND archived_at IS NULL`, [id]);
   const row = result.rows[0];
   if (!row) throw errors.productNotFound();
   return toProduct(row);
