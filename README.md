@@ -66,7 +66,7 @@ npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ### Les tests
 
 ```bash
-cd server && npm test      # 61 tests sur un vrai PostgreSQL jetable (concurrence et panier compris)
+cd server && npm test      # 63 tests sur un vrai PostgreSQL jetable (concurrence et panier compris)
 cd mobile && npm test      # 22 tests : paiement côté app (coupures, réouverture, double clic), panier, formatage
 ```
 
@@ -103,7 +103,7 @@ L'app n'utilise que des modules inclus dans Expo Go. Elle est publiée avec `run
 | `ADMIN_API_KEY` | Clé exigée pour créer un produit. Au moins 16 caractères, obligatoire en production. |
 | `SEED_ON_START` | `true` : ajoute les 9 pulls si la boutique est vide. |
 | `CORS_ORIGINS` | Origines autorisées (`*` par défaut). |
-| `DECART_API_KEY` / `ANYWEAR_DOMAIN` | Facultatives : activent l'essayage en direct (voir § 5). |
+| `FAL_KEY` | Facultative : clé Fal.ai qui active l'essayage en direct (voir § 5). |
 
 ### Déploiement
 
@@ -130,7 +130,7 @@ flowchart LR
   C -- HTTPS / JSON --> API["API Express<br/>(server/src)"]
   API --> DB[("PostgreSQL<br/>source de vérité")]
   UI -. WebView dans l'app .-> T["/essayage<br/>(page servie par l'API)"]
-  T -. WebRTC .-> D["Decart / AnyWear"]
+  T -. WebRTC .-> D["Fal.ai<br/>Lucy VTON Realtime"]
 ```
 
 - **Le serveur et PostgreSQL font foi.** L'app ne stocke ni prix ni stock. Elle garde seulement les identifiants de ses commandes et de ses paiements (pour pouvoir reprendre un paiement incertain), et le contenu du panier (identifiants et quantités).
@@ -287,14 +287,16 @@ Expo SDK 58, Expo Router, TypeScript strict, TanStack Query, Reanimated et Manro
 L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, grâce à une WebView (`react-native-webview`, inclus dans Expo Go). Rien ne s'ouvre dans une autre fenêtre :
 
 - en arrivant sur l'onglet, l'app demande l'accès à la caméra (fenêtre du système, une seule fois), puis l'essayage **démarre tout seul** ;
+- changer de modèle ou de couleur envoie le nouveau pull à la séance en cours : **la vidéo ne se coupe pas** ;
 - la page informe l'app de son état (préparation, en direct, terminé, erreur) ; l'app affiche son propre badge et un bouton « Relancer l'essayage » ;
 - la caméra s'arrête dès qu'on quitte l'onglet ou que l'app passe en arrière-plan.
 
-La fonctionnalité est **facultative et isolée** (`server/src/tryon`) :
+**Fournisseur unique : [Fal.ai](https://fal.ai/models/decart/lucy2-vton/realtime/api), modèle Lucy VTON Realtime** (`decart/lucy2-vton/realtime`). La fonctionnalité est **facultative et isolée** (`server/src/tryon`, `server/web/essayage`) :
 
-- **Mode Decart** (`DECART_API_KEY`) : modèle temps réel `lucy-vton` via WebRTC. La clé reste sur le serveur. Le navigateur ne reçoit qu'un jeton de 60 secondes, limité au modèle, à l'origine de la page et à des séances de 45 secondes.
-- **Mode AnyWear** (`ANYWEAR_DOMAIN`) : charge le widget officiel AnyWear de Decart, une fois le domaine activé par Decart.
-- **Sans configuration** : l'app affiche « Service indisponible » et propose de commander. Aucune photo n'est présentée comme un flux vidéo.
+- **Comment ça marche.** La page ouvre une séance avec le SDK officiel `@fal-ai/client` (`fal.realtime.open` et l'extension `lucyRealtime`). La caméra part en **WebRTC** vers le modèle, qui renvoie la vidéo où le client porte le pull. Le WebSocket de Fal ne sert qu'à établir la connexion et à envoyer le pull choisi (`prompt` et `reference_image_url`, la photo du pull).
+- **La clé `FAL_KEY` ne quitte jamais le serveur.** La page demande à `POST /try-on/token` un jeton temporaire : valable 2 minutes pour ouvrir une séance, et limité à ce seul modèle.
+- **Coût maîtrisé.** Fal facture 0,02 $ par seconde de vidéo. Une séance dure 1 minute au plus (environ 1,20 $), et chaque adresse IP peut demander au plus 6 jetons par minute.
+- **Sans `FAL_KEY`** : l'app affiche « Essayage indisponible » et propose de commander. Aucune photo n'est présentée comme un flux vidéo.
 
 ---
 
@@ -325,8 +327,8 @@ La fonctionnalité est **facultative et isolée** (`server/src/tryon`) :
 | **Double débit en concurrence.** | Verrou, transaction unique et contraintes `UNIQUE`, testés avec 10 requêtes simultanées. Côté app, identifiant persistant et une seule requête à la fois. | — |
 | **Abus ou déni de service.** | Limite globale de 300 requêtes par 15 minutes et par IP. Corps JSON de 10 ko maximum. Requêtes SQL coupées après 10 secondes. | Pare-feu applicatif ou CDN. |
 | **Fuite d'informations.** | Erreurs 500 génériques. `X-Powered-By` désactivé. En-têtes `helmet`. Certificat TLS de la base vérifié. | Journalisation centralisée. |
-| **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé Decart ne part jamais vers le navigateur. Le téléphone ne stocke que des identifiants (aucune donnée personnelle). | Rotation des clés. |
-| **Script tiers (widget AnyWear).** | Autorisé uniquement sur `/essayage`, avec une politique de sécurité (CSP) dédiée. La caméra est limitée à cette page et à l'onglet Essayage, demande l'autorisation du système, et s'arrête dès qu'on quitte l'onglet. Aucune image n'est enregistrée par Ziko Shop. | Figer une version du widget. |
+| **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé Fal ne part jamais vers le navigateur : il reçoit un jeton de 2 minutes, limité au modèle d'essayage. Le téléphone ne stocke que des identifiants (aucune donnée personnelle). | Rotation des clés. |
+| **Caméra et service tiers (Fal.ai).** | La page `/essayage` n'exécute que notre script ; sa politique de sécurité (CSP) n'autorise que le WebSocket de Fal. La caméra est limitée à cette page et à l'onglet Essayage, demande l'autorisation du système, et s'arrête dès qu'on quitte l'onglet. Aucune image n'est enregistrée par Ziko Shop. Séances de 1 minute et jetons limités par IP, pour éviter qu'on vide les crédits. | Relayer la signalisation par notre serveur pour couper une séance côté serveur. |
 | **CORS ouvert (`*`).** | Acceptable : ni cookie ni session, et l'app mobile n'est pas soumise à CORS. Configurable via `CORS_ORIGINS`. | Restreindre si un site web est ajouté. |
 
 ---
@@ -375,7 +377,7 @@ Comme le sujet l'autorise, j'ai utilisé un assistant IA (Claude, d'Anthropic) c
 - **Fait par moi :**
   - le choix du produit et de la direction artistique : boutique de 3 pulls, prix en francs congolais, maquettes « Premium Dark Commerce », logo Ziko Shop, essayage en direct inspiré d'une vidéo que j'ai repérée ;
   - la validation des visuels et des écrans à chaque étape ;
-  - la création et la configuration des comptes et services : GitHub, Render, Expo, AnyWear ;
+  - la création et la configuration des comptes et services : GitHub, Render, Expo, Fal.ai ;
   - le déploiement et les essais sur téléphone ;
   - la relecture du code, que je suis en mesure d'expliquer et de faire évoluer.
 
@@ -393,7 +395,7 @@ server/                     API Node.js + Express + TypeScript
     orders/                 commandes et paiement (orders.service.ts : le cœur)
     http/                   erreurs, middlewares, validation
     tryon/                  essayage en direct (facultatif)
-  test/                     61 tests (Vitest + Supertest + vrai PostgreSQL)
+  test/                     63 tests (Vitest + Supertest + vrai PostgreSQL)
   web/essayage/             script de la page d'essayage (compilé par esbuild)
   public/                   photos des pulls, page /essayage
 mobile/                     app Expo (React Native + TypeScript)
