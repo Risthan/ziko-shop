@@ -66,7 +66,7 @@ npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ### Les tests
 
 ```bash
-cd server && npm test      # 63 tests sur un vrai PostgreSQL jetable (concurrence et panier compris)
+cd server && npm test      # 78 tests sur un vrai PostgreSQL jetable (concurrence, panier et comptes compris)
 cd mobile && npm test      # 22 tests : paiement côté app (coupures, réouverture, double clic), panier, formatage
 ```
 
@@ -124,6 +124,7 @@ flowchart LR
     UI["Écrans<br/>(Design System src/ui)"] --> Q["TanStack Query<br/>cache partagé"]
     UI --> P["Contrôleur de paiement<br/>(src/lib/payment)"]
     P --> S[("AsyncStorage<br/>identifiants de paiement")]
+    UI --> K[("Trousseau sécurisé<br/>jeton de session")]
     Q --> C["Client HTTP typé<br/>(src/api)"]
     P --> C
   end
@@ -154,7 +155,10 @@ Toutes les réponses sont en JSON. Les erreurs ont toujours la même forme, avec
 | | `GET /products/:id` | Un produit. | 200, 404 |
 | 3 | `POST /orders` | Commander un produit `{ productId, quantity }` (format du sujet) ou un panier `{ items: [{ productId, quantity }, …] }`. Refusée si le stock d'un article est insuffisant (l'erreur dit lequel), sinon `en_attente`. En-tête `Idempotency-Key` facultatif. | 201, 200 (déjà créée), 400, 404, 409 |
 | 4 | `POST /orders/:id/pay` | Payer `{ paymentId }`. La commande passe à `payee` et le stock de chaque article diminue. | 200, 400, 404, 409 |
-| 5 | `GET /orders/:id` | Consulter une commande et son statut. | 200, 404 |
+| 5 | `GET /orders/:id` | Consulter une commande et son statut. Une commande rattachée à un compte n'est visible que par son propriétaire. | 200, 404 |
+| | `POST /auth/register`, `POST /auth/login`, `POST /auth/logout` | Créer un compte, se connecter (renvoie un jeton de session), se déconnecter. | 201, 200, 204, 400, 401, 409 |
+| | `GET /me`, `PATCH /me`, `DELETE /me` | Mon profil, le modifier, supprimer mon compte (mot de passe demandé). En-tête `Authorization: Bearer <jeton>`. | 200, 204, 400, 401 |
+| | `GET /me/orders` | Mon historique d'achats, le plus récent d'abord. | 200, 401 |
 | | `GET /health`, `/features`, `/try-on/config` | État du serveur, fonctionnalités facultatives actives. | 200 |
 
 Règles de données :
@@ -262,7 +266,9 @@ Expo SDK 58, Expo Router, TypeScript strict, TanStack Query, Reanimated et Manro
 | Paiement | `src/app/payment/[orderId].tsx` | Référence réelle, montant, statut, Mobile Money **marqué comme démonstration**, bouton « Payer », mode démo « couper le réseau ». |
 | Connexion interrompue | idem (`Interrupted`) | « Nous n'avons pas encore pu confirmer… », « Réessayer le paiement », « Vérifier le statut de ma commande ». |
 | Confirmation | `src/app/confirmation/[orderId].tsx` | Animation de validation, référence, articles et quantités, total payé, statut « Payée ». |
-| Suivi et « Mes commandes » | `src/app/orders/[id].tsx`, `src/app/(tabs)/commandes.tsx` | Statut réel du serveur (« En attente » ou « Payée ») et bouton d'actualisation. Pas de faux suivi de livraison. |
+| Suivi de commande | `src/app/orders/[id].tsx` | Statut réel du serveur (« En attente » ou « Payée ») et bouton d'actualisation. Pas de faux suivi de livraison. |
+| Profil | `src/app/(tabs)/profil.tsx` | Déconnecté : se connecter ou créer un compte. Connecté : identité, nombre de commandes, total dépensé, **mes achats** (historique du serveur), modifier le profil, se déconnecter, supprimer le compte. |
+| Connexion et inscription | `src/app/auth/login.tsx`, `src/app/auth/register.tsx`, `src/app/profile/edit.tsx` | Nom, e-mail, téléphone facultatif, mot de passe (8 caractères minimum). Erreurs claires par champ. Après connexion, retour à la commande en cours. |
 
 ### Design System (`src/theme`, `src/ui`)
 
@@ -310,7 +316,10 @@ L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, g
 - **TanStack Query plutôt qu'un store global** : le serveur reste la source de vérité, les écrans partagent un cache, et les écritures ne sont jamais rejouées automatiquement.
 - **Tests serveur contre un vrai PostgreSQL** (`embedded-postgres`) : les verrous et la concurrence ne se simulent pas de façon fiable.
 - **Le panier s'ajoute au parcours du sujet sans le remplacer.** « Commander » sur la fiche produit mène toujours à l'écran quantité → total → « Payer » demandé. Côté serveur, les lignes vivent dans `order_items` (migration `003`, les anciennes commandes sont reprises) et `POST /orders` accepte toujours `{ productId, quantity }`. Le paiement d'un panier garde exactement les mêmes garanties : une transaction, tout ou rien.
-- **Le panier vit sur le téléphone**, sans compte client : il ne contient que des identifiants et des quantités. Tant que son contenu ne change pas, il renvoie la même clé d'idempotence : appuyer deux fois sur « Commander » ne crée qu'une commande.
+- **Un compte est demandé pour commander dans l'app, mais pas par l'API.** L'app exige d'être connecté avant « Continuer vers le paiement » ou « Commander » : la commande rejoint l'historique du client. L'API, elle, accepte toujours `{ productId, quantity }` sans compte, exactement comme le demande le sujet ; avec un jeton, la commande est rattachée au client et devient privée.
+- **Sessions par jeton opaque plutôt que JWT** : le serveur ne garde que l'empreinte SHA-256 du jeton. Se déconnecter ou supprimer son compte coupe l'accès immédiatement, sans liste noire à gérer. Côté téléphone, le jeton est dans le trousseau sécurisé (Keychain ou Keystore), pas en clair.
+- **Mots de passe avec scrypt**, inclus dans Node : aucune dépendance de plus, un sel par compte, une comparaison à temps constant.
+- **Le panier vit sur le téléphone**, même sans compte : il ne contient que des identifiants et des quantités. Tant que son contenu ne change pas, il renvoie la même clé d'idempotence : appuyer deux fois sur « Commander » ne crée qu'une commande.
 - **Render gratuit et Docker** : le même conteneur tourne en local, en CI et en production.
 
 ---
@@ -321,7 +330,8 @@ L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, g
 |---|---|---|
 | **Paiement non vérifié auprès d'un opérateur.** N'importe qui connaissant l'identifiant d'une commande pourrait la « payer » avec un identifiant inventé. | Identifiants de commande aléatoires (UUID v4). Montant calculé et figé côté serveur. Identifiant de paiement unique. Limite de 30 paiements par minute et par IP. L'app indique clairement que le Mobile Money est simulé. | En production : vérifier chaque paiement auprès de l'opérateur (API ou webhook signé HMAC), avec contrôle du montant. C'est la limite principale de ce test. |
 | **Création de produits par n'importe qui.** | En-tête `X-Admin-Key` comparé à temps constant, obligatoire en production. Sur Render, la clé est générée automatiquement et transmise séparément aux évaluateurs. | Vrais comptes administrateurs avec rôles. |
-| **Lecture des commandes d'autrui (IDOR).** | UUID impossibles à deviner, et aucune route ne liste les commandes. | Comptes clients ou jeton propre à chaque commande. |
+| **Lecture des commandes d'autrui (IDOR).** | UUID impossibles à deviner. Une commande rattachée à un compte n'est visible et payable que par son propriétaire (les autres reçoivent « introuvable »). L'historique `/me/orders` ne renvoie que les commandes du client connecté. | Jeton propre à chaque commande passée sans compte. |
+| **Vol de compte.** | Mots de passe hachés avec scrypt (sel par compte). Même message et même temps de calcul pour « e-mail inconnu » et « mauvais mot de passe ». 20 tentatives par quart d'heure et par IP. Jeton aléatoire de 256 bits, stocké en empreinte côté serveur et dans le trousseau du téléphone. Session expirée après 30 jours d'inactivité. | Vérification de l'e-mail, mot de passe oublié, double authentification. |
 | **Injection SQL.** | Requêtes paramétrées partout. Recherche `LIKE` échappée. | — |
 | **Montants ou quantités manipulés.** | Validation stricte (entiers, bornes). Prix et total calculés par le serveur. Contraintes `CHECK` en base. | — |
 | **Double débit en concurrence.** | Verrou, transaction unique et contraintes `UNIQUE`, testés avec 10 requêtes simultanées. Côté app, identifiant persistant et une seule requête à la fois. | — |
@@ -337,7 +347,7 @@ L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, g
 
 - **Un vrai paiement Mobile Money** (M-Pesa, Orange Money, Airtel Money, via un agrégateur), confirmé par un webhook signé, avec un statut « en cours ».
 - **Réserver le stock** quelques minutes à la création de la commande.
-- Comptes clients, historique et panier synchronisés entre appareils, gestion des tailles.
+- Vérification de l'adresse e-mail, mot de passe oublié, connexion par numéro de téléphone (SMS), panier synchronisé entre appareils, gestion des tailles.
 - Un essayage natif (build de développement avec WebRTC natif) pour ne plus dépendre d'une page web dans l'app.
 - Tests de bout en bout sur téléphone (Maestro), documentation OpenAPI, suivi des erreurs (Sentry).
 - Un hébergement payant (pas de mise en veille) et un CDN pour les images.
@@ -395,7 +405,7 @@ server/                     API Node.js + Express + TypeScript
     orders/                 commandes et paiement (orders.service.ts : le cœur)
     http/                   erreurs, middlewares, validation
     tryon/                  essayage en direct (facultatif)
-  test/                     63 tests (Vitest + Supertest + vrai PostgreSQL)
+  test/                     78 tests (Vitest + Supertest + vrai PostgreSQL)
   web/essayage/             script de la page d'essayage (compilé par esbuild)
   public/                   photos des pulls, page /essayage
 mobile/                     app Expo (React Native + TypeScript)
