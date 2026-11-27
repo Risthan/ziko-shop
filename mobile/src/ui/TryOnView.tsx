@@ -51,6 +51,8 @@ export function TryOnView({ productId, onStatus }: Props) {
       allowsInlineMediaPlayback
       mediaPlaybackRequiresUserAction={false}
       mediaCapturePermissionGrantType="grant"
+      // Android : la vidéo est composée par le processeur graphique (plus fluide).
+      androidLayerType="hardware"
       // Tout reste dans l'app : pas de nouvelle fenêtre.
       setSupportMultipleWindows={false}
       originWhitelist={["https://*", "http://*"]}
