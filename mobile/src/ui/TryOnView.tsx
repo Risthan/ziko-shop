@@ -16,7 +16,7 @@ interface Props {
 /**
  * La séance d'essayage, affichée DANS l'app (WebView, inclus dans Expo Go).
  * La page /essayage du serveur s'y lance toute seule (mode ?embed=1), filme
- * le client et affiche la vidéo renvoyée par le modèle Fal.ai. Elle nous
+ * le client et affiche la vidéo renvoyée par iKawn Mirror. Elle nous
  * informe de son état (prête, en direct, terminée, erreur).
  */
 export function TryOnView({ productId, onStatus }: Props) {

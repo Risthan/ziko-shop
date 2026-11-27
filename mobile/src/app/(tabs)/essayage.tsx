@@ -87,7 +87,7 @@ export default function TryOnScreen() {
   const { model, color } = splitProductName(selected.name);
   const variants = groups.find((group) => group.model === model)?.variants ?? [selected];
   const mode = config.data?.mode;
-  const available = mode === "fal";
+  const available = mode === "ikawn";
   const cameraAllowed = !needsPermission || permission?.granted === true;
 
   const pick = (id: string) => {

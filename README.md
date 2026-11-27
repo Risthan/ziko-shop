@@ -66,7 +66,7 @@ npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ### Les tests
 
 ```bash
-cd server && npm test      # 93 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes et administration compris)
+cd server && npm test      # 97 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes et administration compris)
 cd mobile && npm test      # 22 tests : paiement côté app (coupures, réouverture, double clic), panier, formatage
 ```
 
@@ -103,7 +103,7 @@ L'app n'utilise que des modules inclus dans Expo Go. Elle est publiée avec `run
 | `ADMIN_API_KEY` | Clé d'administration : créer ou modifier un produit, page `/admin`. Au moins 16 caractères, obligatoire en production. |
 | `SEED_ON_START` | `true` : ajoute les 9 pulls si la boutique est vide. |
 | `CORS_ORIGINS` | Origines autorisées (`*` par défaut). |
-| `FAL_KEY` | Facultative : clé Fal.ai qui active l'essayage en direct (voir § 5). |
+| `IKAWN_API_KEY` | Facultative : clé iKawn Mirror qui active l'essayage en direct (voir § 5). |
 
 ### Administrer la boutique (page `/admin`)
 
@@ -144,7 +144,7 @@ flowchart LR
   C -- HTTPS / JSON --> API["API Express<br/>(server/src)"]
   API --> DB[("PostgreSQL<br/>source de vérité")]
   UI -. WebView dans l'app .-> T["/essayage<br/>(page servie par l'API)"]
-  T -. WebRTC .-> D["Fal.ai<br/>Lucy VTON Realtime"]
+  T -. WebRTC .-> D["iKawn Mirror<br/>capacité tryon"]
 ```
 
 - **Le serveur et PostgreSQL font foi.** L'app ne stocke ni prix ni stock. Elle garde seulement les identifiants de ses commandes et de ses paiements (pour pouvoir reprendre un paiement incertain), et le contenu du panier (identifiants et quantités).
@@ -313,12 +313,14 @@ L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, g
 - la page informe l'app de son état (préparation, en direct, terminé, erreur) ; l'app affiche son propre badge et un bouton « Relancer l'essayage » ;
 - la caméra s'arrête dès qu'on quitte l'onglet ou que l'app passe en arrière-plan.
 
-**Fournisseur unique : [Fal.ai](https://fal.ai/models/decart/lucy2-vton/realtime/api), modèle Lucy VTON Realtime** (`decart/lucy2-vton/realtime`). La fonctionnalité est **facultative et isolée** (`server/src/tryon`, `server/web/essayage`) :
+**Fournisseur unique : [iKawn Mirror](https://platform.ikawn.com/documentation/quickstart), capacité `tryon`.** La fonctionnalité est **facultative et isolée** (`server/src/tryon`, `server/web/essayage`) :
 
-- **Comment ça marche.** La page ouvre une séance avec le SDK officiel `@fal-ai/client` (`fal.realtime.open` et l'extension `lucyRealtime`). La caméra part en **WebRTC** vers le modèle, qui renvoie la vidéo où le client porte le pull. Le WebSocket de Fal ne sert qu'à établir la connexion et à envoyer le pull choisi (`prompt` et `reference_image_url`, la photo du pull).
-- **La clé `FAL_KEY` ne quitte jamais le serveur.** La page demande à `POST /try-on/token` un jeton temporaire : valable 2 minutes pour ouvrir une séance, et limité à ce seul modèle.
-- **Coût maîtrisé.** Fal facture 0,02 $ par seconde de vidéo. Une séance dure 30 secondes au plus (environ 0,60 $), et chaque adresse IP peut demander au plus 6 jetons par minute.
-- **Sans `FAL_KEY`** : l'app affiche « Essayage indisponible » et propose de commander. Aucune photo n'est présentée comme un flux vidéo.
+- **Comment ça marche.** La page charge le SDK officiel (`https://api.ikawn.com/sdk/mirror.js`) et ouvre une séance avec `createMirrorClient`, puis `connect(caméra, { capability: "tryon", referenceImage, onRemoteStream })`. La caméra part en **WebRTC** et la vidéo revient avec le pull porté. Changer de modèle ou de couleur appelle `live.set({ referenceImage })` : la vidéo ne se coupe pas. Sans consigne écrite, iKawn remplace uniquement le vêtement par celui de la photo.
+- **La clé `IKAWN_API_KEY` ne quitte jamais le serveur.** La page appelle `POST /try-on/session` avec une clé d'idempotence. Le serveur crée la séance chez iKawn (`POST https://api.ikawn.com/v1/sessions`, `{"capability":"tryon"}`) et ne renvoie que les identifiants limités à cette séance, avec `Cache-Control: no-store`.
+- **Coût maîtrisé.** iKawn facture le temps de séance active, 0,008 $ par seconde (300 secondes offertes à l'ouverture d'un compte vérifié). Une séance dure 30 secondes au plus, soit environ 0,24 $. La page l'arrête, et **le serveur demande lui-même la fin de la séance** à iKawn juste après (`/sessions/{id}/end`), même si le téléphone a perdu le réseau. Quitter l'onglet arrête aussi la séance. Au plus 6 séances par minute et par adresse IP.
+- **Cas difficiles.** Si un autre client essaie déjà un pull (le compte accepte une séance à la fois), la page l'explique et réessaie deux fois. Un crédit épuisé, un service indisponible, la caméra refusée ou le réseau coupé donnent chacun un message clair et un bouton « Relancer ». La commande, elle, n'est jamais bloquée.
+- **Indépendance vis-à-vis de Decart.** Le SDK d'iKawn est le client « Reactor » (`@reactor-team/js-sdk` 3.4.0, modèle annoncé `reactor/xmax-x2-1`). Son code ne contient aucune référence à Decart, à Lucy ou à Fal. On ne peut pas vérifier depuis l'extérieur ce qui tourne sur leurs serveurs.
+- **Sans `IKAWN_API_KEY`** : l'app affiche « Essayage indisponible » et propose de commander. Aucune photo n'est présentée comme un flux vidéo.
 
 ---
 
@@ -353,8 +355,8 @@ L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, g
 | **Double débit en concurrence.** | Verrou, transaction unique et contraintes `UNIQUE`, testés avec 10 requêtes simultanées. Côté app, identifiant persistant et une seule requête à la fois. | — |
 | **Abus ou déni de service.** | Limite globale de 300 requêtes par 15 minutes et par IP. Corps JSON de 10 ko maximum. Requêtes SQL coupées après 10 secondes. | Pare-feu applicatif ou CDN. |
 | **Fuite d'informations.** | Erreurs 500 génériques. `X-Powered-By` désactivé. En-têtes `helmet`. Certificat TLS de la base vérifié. | Journalisation centralisée. |
-| **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé Fal ne part jamais vers le navigateur : il reçoit un jeton de 2 minutes, limité au modèle d'essayage. Le téléphone ne stocke que des identifiants (aucune donnée personnelle). | Rotation des clés. |
-| **Caméra et service tiers (Fal.ai).** | La page `/essayage` n'exécute que notre script ; sa politique de sécurité (CSP) n'autorise que le WebSocket de Fal. La caméra est limitée à cette page et à l'onglet Essayage, demande l'autorisation du système, et s'arrête dès qu'on quitte l'onglet. Aucune image n'est enregistrée par Ziko Shop. Séances de 30 secondes et jetons limités par IP, pour éviter qu'on vide les crédits. | Relayer la signalisation par notre serveur pour couper une séance côté serveur. |
+| **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé iKawn ne part jamais vers le navigateur : il reçoit seulement les identifiants d'une séance. Le téléphone ne stocke que des identifiants (aucune donnée personnelle). | Rotation des clés. |
+| **Caméra et service tiers (iKawn Mirror).** | La page `/essayage` n'exécute que notre script et le SDK officiel d'iKawn (CSP). La caméra est limitée à cette page et à l'onglet Essayage, demande l'autorisation du système, et s'arrête dès qu'on quitte l'onglet. Aucune image n'est enregistrée par Ziko Shop. Séances de 30 secondes, terminées aussi par le serveur, et créations limitées par IP, pour éviter qu'on vide les crédits. | Réserver l'essayage aux clients connectés. |
 | **CORS ouvert (`*`).** | Acceptable : ni cookie ni session, et l'app mobile n'est pas soumise à CORS. Configurable via `CORS_ORIGINS`. | Restreindre si un site web est ajouté. |
 
 ---
@@ -403,7 +405,7 @@ Comme le sujet l'autorise, j'ai utilisé un assistant IA (Claude, d'Anthropic) c
 - **Fait par moi :**
   - le choix du produit et de la direction artistique : boutique de 3 pulls, prix en francs congolais, maquettes « Premium Dark Commerce », logo Ziko Shop, essayage en direct inspiré d'une vidéo que j'ai repérée ;
   - la validation des visuels et des écrans à chaque étape ;
-  - la création et la configuration des comptes et services : GitHub, Render, Expo, Fal.ai ;
+  - la création et la configuration des comptes et services : GitHub, Render, Expo, iKawn ;
   - le déploiement et les essais sur téléphone ;
   - la relecture du code, que je suis en mesure d'expliquer et de faire évoluer.
 
@@ -421,7 +423,7 @@ server/                     API Node.js + Express + TypeScript
     orders/                 commandes et paiement (orders.service.ts : le cœur)
     http/                   erreurs, middlewares, validation
     tryon/                  essayage en direct (facultatif)
-  test/                     93 tests (Vitest + Supertest + vrai PostgreSQL)
+  test/                     97 tests (Vitest + Supertest + vrai PostgreSQL)
   web/essayage/             script de la page d'essayage (compilé par esbuild)
   public/                   photos des pulls, page /essayage
 mobile/                     app Expo (React Native + TypeScript)

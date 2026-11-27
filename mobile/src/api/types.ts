@@ -60,8 +60,8 @@ export interface Features {
   liveTryOn: boolean;
 }
 
-/** Essayage en direct : actif via Fal.ai (Lucy VTON Realtime), ou désactivé sur le serveur. */
-export type TryOnConfig = { mode: "fal"; maxSessionSeconds: number } | { mode: "off" };
+/** Essayage en direct : actif via iKawn Mirror (capacité « tryon »), ou désactivé sur le serveur. */
+export type TryOnConfig = { mode: "ikawn"; maxSessionSeconds: number } | { mode: "off" };
 
 export type ApiErrorCode =
   | "VALIDATION_ERROR"
