@@ -13,13 +13,23 @@ Ziko Shop vend trois modèles de pulls : Le Classique (sweat col rond), L'Essent
 | Dépôt | https://github.com/Risthan/ziko-shop |
 
 <p>
-  <img src="docs/screenshots/1-accueil.jpg" width="150" alt="Accueil" />
-  <img src="docs/screenshots/2-fiche.jpg" width="150" alt="Fiche produit" />
-  <img src="docs/screenshots/3-commande.jpg" width="150" alt="Commande" />
-  <img src="docs/screenshots/4-paiement.jpg" width="150" alt="Paiement" />
-  <img src="docs/screenshots/5-coupure.jpg" width="150" alt="Connexion interrompue pendant le paiement" />
-  <img src="docs/screenshots/6-confirmation.jpg" width="150" alt="Commande confirmée, débitée une seule fois" />
+  <img src="docs/screenshots/01-accueil.jpg" width="160" alt="Accueil : bannière, collections" />
+  <img src="docs/screenshots/02-catalogue.jpg" width="160" alt="Catalogue rangé par modèle, vraies pastilles de couleur" />
+  <img src="docs/screenshots/03-fiche.jpg" width="160" alt="Fiche produit : 5 couleurs, Commander, Au panier, Essayer" />
+  <img src="docs/screenshots/04-panier.jpg" width="160" alt="Panier de plusieurs pulls" />
+  <img src="docs/screenshots/05-commande.jpg" width="160" alt="Commande : quantité et total" />
 </p>
+<p>
+  <img src="docs/screenshots/06-paiement.jpg" width="160" alt="Paiement, mode démo « couper le réseau »" />
+  <img src="docs/screenshots/07-coupure.jpg" width="160" alt="Connexion interrompue pendant le paiement" />
+  <img src="docs/screenshots/08-confirmation.jpg" width="160" alt="Commande confirmée, débitée une seule fois" />
+  <img src="docs/screenshots/09-profil.jpg" width="160" alt="Profil et historique d'achats" />
+</p>
+<p>
+  <img src="docs/screenshots/10-admin.jpg" width="820" alt="Espace administration : chiffres, prix, stock, photos" />
+</p>
+
+<sub>Captures réelles de l'app (version web d'Expo, taille iPhone) et de la page <code>/admin</code>, faites sur une copie locale de l'API. L'essayage en direct n'y figure pas : il se montre dans la vidéo, sur un vrai téléphone.</sub>
 
 ---
 
@@ -66,8 +76,8 @@ npm run dev               # terminal 2 : lance l'API sur http://localhost:3000
 ### Les tests
 
 ```bash
-cd server && npm test      # 100 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes et administration compris)
-cd mobile && npm test      # 22 tests : paiement côté app (coupures, réouverture, double clic), panier, formatage
+cd server && npm test      # 101 tests sur un vrai PostgreSQL jetable (concurrence, panier, comptes, administration et catalogue compris)
+cd mobile && npm test      # 26 tests : paiement côté app (coupures, réouverture, double clic), panier, catalogue et couleurs, formatage
 ```
 
 Les deux suites, le typage et la construction de l'image Docker tournent aussi dans la CI GitHub à chaque push.
@@ -274,8 +284,8 @@ Expo SDK 58, Expo Router, TypeScript strict, TanStack Query, Reanimated et Manro
 
 | Écran | Fichier | Contenu |
 |---|---|---|
-| Accueil et catalogue | `src/app/(tabs)/index.tsx` | Bannière « Votre style. Vos règles. », recherche par nom (sans accents), collections, grille de 2 produits par ligne (nom, prix « 75 000 FC », stock, couleurs), squelettes de chargement, états vide, sans résultat et serveur injoignable. Rappel d'un paiement à confirmer. |
-| Fiche produit | `src/app/product/[id].tsx` | Photo, vignettes et pastilles des couleurs (changement en place : image, prix et stock), bouton principal « Commander » (désactivé si épuisé), « Au panier » et « Essayer ». |
+| Accueil et catalogue | `src/app/(tabs)/index.tsx` | Bannière « Votre style. Vos règles. », recherche par nom (sans accents), collections, puis le catalogue **rangé par modèle** : un en-tête par catégorie (type de pull, prix, pastilles des couleurs) et ses couleurs toujours dans le même ordre (Noir, Crème, Moka, Bleu roi, Rouge), 2 cartes par ligne (photo entière en 4:5, couleur avec sa vraie pastille, prix « 75 000 FC », stock, bouton « + » d'ajout rapide). Squelettes de chargement, états vide, sans résultat et serveur injoignable. Rappel d'un paiement à confirmer. |
+| Fiche produit | `src/app/product/[id].tsx` | Grande photo et colonne de vignettes **de même hauteur au pixel près**, quel que soit le nombre de couleurs (tailles calculées d'après l'écran). Pastilles aux vraies couleurs, changement en place (image, prix et stock, photos déjà chargées), bouton principal « Commander » (désactivé si épuisé), « Au panier » et « Essayer ». |
 | Essayage en direct | `src/app/(tabs)/essayage.tsx` | La caméra s'ouvre **dans l'app** et l'essayage démarre tout seul. Changer de modèle ou de couleur relance l'essayage avec le nouveau pull. « Ajouter au panier » et « Commander ce pull » restent toujours possibles, même si le service d'essayage est indisponible. |
 | Panier | `src/app/(tabs)/panier.tsx` | Plusieurs pulls, chacun avec sa quantité, un raccourci « Essayer », le total, puis une seule commande pour tout le panier. Pastille du nombre de pièces sur l'onglet. Le panier se vide quand sa commande est payée. |
 | Commande | `src/app/order/[productId].tsx` | Un produit et une quantité (le parcours du sujet), total recalculé, création de la commande. Une fenêtre s'affiche en cas de stock insuffisant. |
@@ -293,6 +303,11 @@ Expo SDK 58, Expo Router, TypeScript strict, TanStack Query, Reanimated et Manro
   - typographie Manrope, du Regular à l'ExtraBold ;
   - espacements, rayons, ombres discrètes (pas d'effet néon) et durées d'animation.
 - **Composants réutilisés par tous les écrans** : boutons, en-tête avec le logo officiel, barre d'onglets, cartes produits, pastilles de couleurs, sélecteur de quantité, badges de stock et de statut, messages, fenêtre modale, squelettes, états vides et d'erreur, récapitulatif de commande, coche animée et preloader.
+- **Photos et couleurs** :
+  - chaque cadre photo prend la couleur du fond de studio des photos (`photoBackdrop`) : aucun liseré ne dépasse, même pendant le chargement ;
+  - les pastilles montrent la vraie couleur du pull, relevée sur les photos (`src/lib/swatches.ts`) ;
+  - le catalogue est trié de la même façon partout (`sortCatalog`, `src/lib/catalog.ts`), et le serveur renvoie les 15 pulls dans cet ordre ;
+  - les photos sont chargées d'avance (`src/lib/prefetch.ts`) : grille, fiche et changement de couleur s'affichent sans attente.
 - **Animations Reanimated** :
   - apparition en cascade des produits ;
   - pression des boutons (avec retour haptique) ;
@@ -423,7 +438,7 @@ server/                     API Node.js + Express + TypeScript
     orders/                 commandes et paiement (orders.service.ts : le cœur)
     http/                   erreurs, middlewares, validation
     tryon/                  essayage en direct (facultatif)
-  test/                     100 tests (Vitest + Supertest + vrai PostgreSQL)
+  test/                     101 tests (Vitest + Supertest + vrai PostgreSQL)
   web/essayage/             script de la page d'essayage (compilé par esbuild)
   public/                   photos des pulls, page /essayage
 mobile/                     app Expo (React Native + TypeScript)
