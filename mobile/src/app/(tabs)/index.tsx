@@ -230,7 +230,7 @@ function PendingPaymentBanner() {
 
 function PendingBannerFor({ orderId }: { orderId: string }) {
   const order = useOrder(orderId);
-  if (order.data?.status === "payee") return null;
+  if (!order.data || order.data.status === "payee") return null;
   return (
     <Animated.View entering={FadeInDown}>
       <PressableScale

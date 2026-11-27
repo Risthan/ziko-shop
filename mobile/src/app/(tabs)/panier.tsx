@@ -9,6 +9,7 @@ import type { Product } from "@/api/types";
 import { MAX_PER_LINE } from "@/lib/cart/cartLogic";
 import { cart, useCart } from "@/lib/cart/useCart";
 import { formatCdf, splitProductName } from "@/lib/format";
+import { useSession } from "@/lib/auth/session";
 import { haptics } from "@/lib/haptics";
 import { newIdempotencyKey } from "@/lib/ids";
 import { queryKeys, rememberOrder, useProducts } from "@/lib/queries";
@@ -32,6 +33,8 @@ import { EmptyState, LoadingState } from "@/ui/States";
  */
 export default function CartScreen() {
   const { lines, count } = useCart();
+  const { status } = useSession();
+  const signedIn = status === "signedIn";
   const products = useProducts();
   const client = useQueryClient();
   const [creating, setCreating] = useState(false);
@@ -47,6 +50,11 @@ export default function CartScreen() {
   const blocked = rows.filter(({ line, product }) => product.stock < line.quantity);
 
   const checkout = async () => {
+    // Un compte est demandé pour commander ; le panier est conservé pendant la connexion.
+    if (!signedIn) {
+      router.push({ pathname: "/auth/login", params: { raison: "commande" } });
+      return;
+    }
     setCreating(true);
     setNotice(null);
     const { key, signature } = cart.checkoutKey(newIdempotencyKey);
@@ -146,8 +154,9 @@ export default function CartScreen() {
 
           <View style={styles.footer}>
             <Button
-              title={`Commander · ${formatCdf(total)}`}
-              iconRight="arrow-forward"
+              title={signedIn ? `Commander · ${formatCdf(total)}` : "Se connecter pour commander"}
+              icon={signedIn ? undefined : "log-in-outline"}
+              iconRight={signedIn ? "arrow-forward" : undefined}
               loading={creating}
               loadingLabel="Création de la commande…"
               disabled={blocked.length > 0}

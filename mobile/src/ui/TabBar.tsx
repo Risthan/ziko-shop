@@ -14,7 +14,7 @@ const ICONS: Record<string, { active: IconName; idle: IconName }> = {
   index: { active: "home", idle: "home-outline" },
   essayage: { active: "scan", idle: "scan-outline" },
   panier: { active: "cart", idle: "cart-outline" },
-  commandes: { active: "receipt", idle: "receipt-outline" },
+  profil: { active: "person", idle: "person-outline" },
 };
 
 /** Barre d'onglets flottante, identique sur tous les écrans principaux. */

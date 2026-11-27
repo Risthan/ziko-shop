@@ -6,6 +6,7 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { ApiError, api } from "@/api/client";
 import { modelCopy } from "@/lib/catalog";
 import { formatCdf, splitProductName } from "@/lib/format";
+import { useSession } from "@/lib/auth/session";
 import { haptics } from "@/lib/haptics";
 import { newIdempotencyKey } from "@/lib/ids";
 import { queryKeys, rememberOrder, useProduct } from "@/lib/queries";
@@ -32,6 +33,8 @@ export default function OrderScreen() {
   const { productId } = useLocalSearchParams<{ productId: string }>();
   const product = useProduct(productId);
   const client = useQueryClient();
+  const { status } = useSession();
+  const signedIn = status === "signedIn";
   const [quantity, setQuantity] = useState(1);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<{ tone: NoticeTone; title: string; message: string } | null>(null);
@@ -60,6 +63,11 @@ export default function OrderScreen() {
   const soldOut = current.stock <= 0;
 
   const createOrder = async () => {
+    // Un compte est demandé pour commander : la commande rejoint son historique.
+    if (!signedIn) {
+      router.push({ pathname: "/auth/login", params: { raison: "commande" } });
+      return;
+    }
     setCreating(true);
     setNotice(null);
     const previous = orderKey.current;
@@ -144,8 +152,9 @@ export default function OrderScreen() {
 
       <View style={styles.footer}>
         <Button
-          title={soldOut ? "Produit épuisé" : "Continuer vers le paiement"}
-          iconRight={soldOut ? undefined : "arrow-forward"}
+          title={soldOut ? "Produit épuisé" : signedIn ? "Continuer vers le paiement" : "Se connecter pour commander"}
+          icon={!soldOut && !signedIn ? "log-in-outline" : undefined}
+          iconRight={soldOut || !signedIn ? undefined : "arrow-forward"}
           loading={creating}
           loadingLabel="Création de la commande…"
           disabled={soldOut}
