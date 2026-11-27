@@ -401,7 +401,7 @@ Durée : 3 à 4 minutes. On filme l'écran du téléphone, avec Expo Go et l'app
 
 Comme le sujet l'autorise, j'ai utilisé un assistant IA (Claude, d'Anthropic) comme outil de développement.
 
-- **Écrit par l'IA, à partir de mes consignes :** la grande majorité du code (serveur, app, tests), la configuration Docker, Render, EAS et CI, et ce README. La bannière a été générée avec l'outil d'images FLORA, à partir du logo que j'ai fourni. Les photos des 15 pulls sont celles que j'ai choisies : fond clair, format 3:4 (1440 × 1920, JPEG de 100 à 270 Ko). Le pull se détache bien du fond, ce qui aide l'essayage en direct, qui envoie la photo à iKawn comme référence ; et les fichiers légers chargent vite.
+- **Écrit par l'IA, à partir de mes consignes :** la grande majorité du code (serveur, app, tests), la configuration Docker, Render, EAS et CI, et ce README. La bannière de l'accueil, un mannequin fictif qui porte le pull demi-zip crème de la collection, a été générée avec l'outil d'images FLORA, à partir de la photo du pull. Les photos des 15 pulls sont celles que j'ai choisies : fond clair, format 3:4 (1440 × 1920, JPEG de 100 à 270 Ko). Le pull se détache bien du fond, ce qui aide l'essayage en direct, qui envoie la photo à iKawn comme référence ; et les fichiers légers chargent vite.
 - **Fait par moi :**
   - le choix du produit et de la direction artistique : boutique de 3 pulls, prix en francs congolais, maquettes « Premium Dark Commerce », logo Ziko Shop, essayage en direct inspiré d'une vidéo que j'ai repérée ;
   - la validation des visuels et des écrans à chaque étape ;
