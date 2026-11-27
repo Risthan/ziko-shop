@@ -116,15 +116,15 @@ export default function OrdersScreen() {
   );
 }
 
-/** « Le Classique · Noir · Qté 2 » ou « Le Classique · Noir + 2 autres · 4 pièces ». */
+/** « Le Classique · Noir · Qté 2 », ou pour un panier « 2 articles · 3 pièces » (court, lisible sur petit écran). */
 function describeOrder(order: Order): string {
   const first = order.items[0];
   if (!first) return "";
-  const { model, color } = splitProductName(first.product.name);
-  const name = [model, color].filter(Boolean).join(" · ");
-  if (order.items.length === 1) return `${name} · Qté ${first.quantity}`;
-  const others = order.items.length - 1;
-  return `${name} + ${others} autre${others > 1 ? "s" : ""} · ${order.itemCount} pièces`;
+  if (order.items.length === 1) {
+    const { model, color } = splitProductName(first.product.name);
+    return `${[model, color].filter(Boolean).join(" · ")} · Qté ${first.quantity}`;
+  }
+  return `${order.items.length} articles · ${order.itemCount} pièce${order.itemCount > 1 ? "s" : ""}`;
 }
 
 const styles = StyleSheet.create({
