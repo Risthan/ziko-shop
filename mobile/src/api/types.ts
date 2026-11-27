@@ -45,8 +45,8 @@ export interface Features {
   liveTryOn: boolean;
 }
 
-/** Mode d'essayage configuré sur le serveur : API Decart, widget AnyWear, ou désactivé. */
-export type TryOnConfig = { mode: "decart"; maxSessionSeconds: number } | { mode: "anywear"; widgetUrl: string } | { mode: "off" };
+/** Essayage en direct : actif via Fal.ai (Lucy VTON Realtime), ou désactivé sur le serveur. */
+export type TryOnConfig = { mode: "fal"; maxSessionSeconds: number } | { mode: "off" };
 
 export type ApiErrorCode =
   | "VALIDATION_ERROR"

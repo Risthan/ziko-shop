@@ -4,7 +4,6 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState, Linking, Platform, ScrollView, StyleSheet, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { API_URL } from "@/config";
 import { cart } from "@/lib/cart/useCart";
 import { groupByModel, modelCopy } from "@/lib/catalog";
 import { formatCdf, normalize, splitProductName } from "@/lib/format";
@@ -73,7 +72,8 @@ export default function TryOnScreen() {
   const selected = all.find((p) => p.id === (pickedId ?? produit)) ?? all.find((p) => p.stock > 0) ?? all[0];
 
   // Nouveau pull ou nouvel essai : la séance repart de zéro.
-  useEffect(() => setStatus({ value: "loading" }), [selected?.id, attempt]);
+  // Nouvel essai (« Relancer ») : la séance repart de zéro. Changer de pull, lui, ne coupe pas la séance.
+  useEffect(() => setStatus({ value: "loading" }), [attempt]);
 
   if (!selected) {
     return (
@@ -87,7 +87,7 @@ export default function TryOnScreen() {
   const { model, color } = splitProductName(selected.name);
   const variants = groups.find((group) => group.model === model)?.variants ?? [selected];
   const mode = config.data?.mode;
-  const available = mode === "decart" || mode === "anywear";
+  const available = mode === "fal";
   const cameraAllowed = !needsPermission || permission?.granted === true;
 
   const pick = (id: string) => {
@@ -147,7 +147,7 @@ export default function TryOnScreen() {
 
     return (
       <>
-        <TryOnView key={`${selected.id}-${attempt}`} url={`${API_URL}/essayage?produit=${selected.id}&embed=1`} onStatus={onStatus} />
+        <TryOnView key={attempt} productId={selected.id} onStatus={onStatus} />
         <StatusChip status={status.value} />
         {status.value === "ended" || status.value === "error" ? (
           <Animated.View entering={FadeIn.duration(motion.base)} exiting={FadeOut.duration(motion.fast)} style={styles.endCard}>
@@ -175,7 +175,7 @@ export default function TryOnScreen() {
 
         <View style={styles.stage}>{renderStage()}</View>
         <AppText variant="caption" center style={styles.privacy}>
-          L'image de la caméra sert uniquement pendant la séance. Ziko Shop n'enregistre aucune image.
+          L'image de la caméra sert uniquement pendant la séance (1 minute au plus). Ziko Shop n'enregistre aucune image.
         </AppText>
 
         {/* Choix du modèle : l'essayage se relance avec le pull choisi. */}

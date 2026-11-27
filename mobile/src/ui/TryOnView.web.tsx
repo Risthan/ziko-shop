@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
+import { API_URL } from "@/config";
 import { colors, spacing } from "@/theme";
 import { AppText } from "./AppText";
 import { Button } from "./Button";
@@ -12,7 +13,7 @@ export type TryOnStatus = "loading" | "ready" | "live" | "ended" | "error";
  * on propose donc de l'ouvrir. Sur iPhone et Android, c'est TryOnView.tsx
  * qui l'intègre dans l'app.
  */
-export function TryOnView({ url, onStatus }: { url: string; onStatus: (status: TryOnStatus, message?: string) => void }) {
+export function TryOnView({ productId, onStatus }: { productId: string; onStatus: (status: TryOnStatus, message?: string) => void }) {
   useEffect(() => {
     onStatus("ready");
   }, [onStatus]);
@@ -24,7 +25,12 @@ export function TryOnView({ url, onStatus }: { url: string; onStatus: (status: T
       <AppText variant="small" center>
         Sur ordinateur, ouvrez-le dans un nouvel onglet.
       </AppText>
-      <Button title="Ouvrir l'essayage" icon="open-outline" variant="secondary" onPress={() => window.open(url.replace("&embed=1", ""), "_blank")} />
+      <Button
+        title="Ouvrir l'essayage"
+        icon="open-outline"
+        variant="secondary"
+        onPress={() => window.open(`${API_URL}/essayage?produit=${encodeURIComponent(productId)}`, "_blank")}
+      />
     </View>
   );
 }
