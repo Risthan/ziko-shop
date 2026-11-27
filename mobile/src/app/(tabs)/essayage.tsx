@@ -175,7 +175,7 @@ export default function TryOnScreen() {
 
         <View style={styles.stage}>{renderStage()}</View>
         <AppText variant="caption" center style={styles.privacy}>
-          L'image de la caméra sert uniquement pendant la séance (1 minute au plus). Ziko Shop n'enregistre aucune image.
+          L'image de la caméra sert uniquement pendant la séance (30 secondes au plus). Ziko Shop n'enregistre aucune image.
         </AppText>
 
         {/* Choix du modèle : l'essayage se relance avec le pull choisi. */}

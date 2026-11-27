@@ -295,7 +295,7 @@ L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, g
 
 - **Comment ça marche.** La page ouvre une séance avec le SDK officiel `@fal-ai/client` (`fal.realtime.open` et l'extension `lucyRealtime`). La caméra part en **WebRTC** vers le modèle, qui renvoie la vidéo où le client porte le pull. Le WebSocket de Fal ne sert qu'à établir la connexion et à envoyer le pull choisi (`prompt` et `reference_image_url`, la photo du pull).
 - **La clé `FAL_KEY` ne quitte jamais le serveur.** La page demande à `POST /try-on/token` un jeton temporaire : valable 2 minutes pour ouvrir une séance, et limité à ce seul modèle.
-- **Coût maîtrisé.** Fal facture 0,02 $ par seconde de vidéo. Une séance dure 1 minute au plus (environ 1,20 $), et chaque adresse IP peut demander au plus 6 jetons par minute.
+- **Coût maîtrisé.** Fal facture 0,02 $ par seconde de vidéo. Une séance dure 30 secondes au plus (environ 0,60 $), et chaque adresse IP peut demander au plus 6 jetons par minute.
 - **Sans `FAL_KEY`** : l'app affiche « Essayage indisponible » et propose de commander. Aucune photo n'est présentée comme un flux vidéo.
 
 ---
@@ -328,7 +328,7 @@ L'onglet Essayage affiche la page `/essayage?embed=1` de l'API **dans l'app**, g
 | **Abus ou déni de service.** | Limite globale de 300 requêtes par 15 minutes et par IP. Corps JSON de 10 ko maximum. Requêtes SQL coupées après 10 secondes. | Pare-feu applicatif ou CDN. |
 | **Fuite d'informations.** | Erreurs 500 génériques. `X-Powered-By` désactivé. En-têtes `helmet`. Certificat TLS de la base vérifié. | Journalisation centralisée. |
 | **Secrets exposés.** | Variables d'environnement, `.env` ignoré par Git. La clé Fal ne part jamais vers le navigateur : il reçoit un jeton de 2 minutes, limité au modèle d'essayage. Le téléphone ne stocke que des identifiants (aucune donnée personnelle). | Rotation des clés. |
-| **Caméra et service tiers (Fal.ai).** | La page `/essayage` n'exécute que notre script ; sa politique de sécurité (CSP) n'autorise que le WebSocket de Fal. La caméra est limitée à cette page et à l'onglet Essayage, demande l'autorisation du système, et s'arrête dès qu'on quitte l'onglet. Aucune image n'est enregistrée par Ziko Shop. Séances de 1 minute et jetons limités par IP, pour éviter qu'on vide les crédits. | Relayer la signalisation par notre serveur pour couper une séance côté serveur. |
+| **Caméra et service tiers (Fal.ai).** | La page `/essayage` n'exécute que notre script ; sa politique de sécurité (CSP) n'autorise que le WebSocket de Fal. La caméra est limitée à cette page et à l'onglet Essayage, demande l'autorisation du système, et s'arrête dès qu'on quitte l'onglet. Aucune image n'est enregistrée par Ziko Shop. Séances de 30 secondes et jetons limités par IP, pour éviter qu'on vide les crédits. | Relayer la signalisation par notre serveur pour couper une séance côté serveur. |
 | **CORS ouvert (`*`).** | Acceptable : ni cookie ni session, et l'app mobile n'est pas soumise à CORS. Configurable via `CORS_ORIGINS`. | Restreindre si un site web est ajouté. |
 
 ---

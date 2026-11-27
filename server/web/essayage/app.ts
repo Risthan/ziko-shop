@@ -62,7 +62,7 @@ function notify(status: TryOnStatus, text?: string) {
 
 let products: Product[] = [];
 let current: Product | null = null;
-let maxSessionSeconds = 60;
+let maxSessionSeconds = 30;
 let camera: MediaStream | null = null;
 let session: ReturnType<typeof openSession> | null = null;
 let countdown: number | undefined;

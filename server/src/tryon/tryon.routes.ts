@@ -29,7 +29,7 @@ export const FAL_ENDPOINT = "decart/lucy2-vton/realtime";
 const FAL_APP_ALIAS = "lucy2-vton";
 const FAL_TOKEN_URL = "https://rest.fal.ai/tokens/";
 const TOKEN_EXPIRATION_SECONDS = 120;
-export const MAX_SESSION_SECONDS = 60;
+export const MAX_SESSION_SECONDS = 30;
 
 const PAGE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../public/essayage");
 

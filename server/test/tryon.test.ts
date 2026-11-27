@@ -46,10 +46,11 @@ describe("Essayage en direct via Fal.ai", () => {
     expect(res.text).not.toContain("cle-secrete");
   });
 
-  it("indique la durée maximale d'une séance", async () => {
+  it("limite chaque séance à 30 secondes (maîtrise des crédits Fal)", async () => {
     const app = express().use(tryOnRouter("cle-secrete", fakeFal().fetchImpl));
     const res = await request(app).get("/try-on/config");
     expect(res.body).toEqual({ mode: "fal", maxSessionSeconds: MAX_SESSION_SECONDS });
+    expect(MAX_SESSION_SECONDS).toBe(30);
   });
 });
 
