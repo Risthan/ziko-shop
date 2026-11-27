@@ -39,7 +39,8 @@
           "backgroundColor": "#090D10"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-secure-store"
     ],
     "extra": {
       "router": {

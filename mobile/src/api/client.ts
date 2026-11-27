@@ -1,5 +1,6 @@
 import { API_URL } from "@/config";
-import type { ApiErrorCode, Features, Order, PayOrderResponse, Product, TryOnConfig } from "./types";
+import { session } from "@/lib/auth/session";
+import type { ApiErrorCode, AuthResponse, Features, Order, PayOrderResponse, Product, TryOnConfig, User } from "./types";
 
 /**
  * Trois familles d'échec, qui ne se traitent pas de la même façon :
@@ -28,7 +29,7 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   headers?: Record<string, string>;
   timeoutMs?: number;
@@ -40,11 +41,18 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
+  // Client connecté : son jeton accompagne chaque requête.
+  const token = session.token();
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
       method: options.method ?? "GET",
-      headers: { Accept: "application/json", "Content-Type": "application/json", ...options.headers },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal,
     });
@@ -57,6 +65,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     clearTimeout(timer);
   }
 
+  if (response.status === 204) return undefined as T;
+
   let payload: unknown;
   try {
     payload = await response.json();
@@ -66,6 +76,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (!response.ok) {
     const error = (payload as { error?: { code?: string; message?: string; details?: Record<string, unknown> } }).error;
+    // Session expirée ou révoquée : on déconnecte proprement ce téléphone.
+    if (error?.code === "SESSION_EXPIRED" && token) void session.signOut();
     throw new ApiError(
       "http",
       error?.message ?? `Erreur du serveur (${response.status}).`,
@@ -99,6 +111,24 @@ export const api = {
     }).then((r) => r.order),
 
   getOrder: (id: string) => request<{ order: Order }>(`/orders/${id}`).then((r) => r.order),
+
+  // --- Compte client ---
+  register: (input: { fullName: string; email: string; password: string; phone?: string }) =>
+    request<AuthResponse>("/auth/register", { method: "POST", body: input }),
+
+  login: (email: string, password: string) => request<AuthResponse>("/auth/login", { method: "POST", body: { email, password } }),
+
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
+
+  me: () => request<{ user: User }>("/me").then((r) => r.user),
+
+  updateMe: (input: { fullName?: string; phone?: string }) =>
+    request<{ user: User }>("/me", { method: "PATCH", body: input }).then((r) => r.user),
+
+  deleteMe: (password: string) => request<void>("/me", { method: "DELETE", body: { password } }),
+
+  /** Mes commandes (historique du compte), les plus récentes d'abord. */
+  myOrders: () => request<{ orders: Order[] }>("/me/orders").then((r) => r.orders),
 
   /**
    * Envoie le paiement. `simulateLostResponse` (mode démo) envoie vraiment la

@@ -11,6 +11,21 @@ export interface Product {
 
 export type OrderStatus = "en_attente" | "payee";
 
+/** Compte client (le mot de passe ne quitte jamais le serveur). */
+export interface User {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string | null;
+  createdAt: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  /** Jeton de session, à envoyer dans l'en-tête Authorization. */
+  token: string;
+}
+
 export interface OrderItem {
   productId: string;
   product: { name: string; imageUrl: string | null };

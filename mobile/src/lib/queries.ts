@@ -1,6 +1,8 @@
-import { QueryClient, useQueries, useQuery, useQueryClient, type QueryClient as QC } from "@tanstack/react-query";
+import { QueryClient, useQuery, useQueryClient, type QueryClient as QC } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { ApiError, api } from "@/api/client";
 import type { Order, Product } from "@/api/types";
+import { session, useSession } from "./auth/session";
 import { cart } from "./cart/useCart";
 import { orderHistory } from "./orderHistory";
 
@@ -14,6 +16,7 @@ export const queryKeys = {
   product: (id: string) => ["product", id] as const,
   order: (id: string) => ["order", id] as const,
   myOrders: ["my-orders"] as const,
+  me: ["me"] as const,
   tryOn: ["try-on-config"] as const,
 };
 
@@ -53,13 +56,37 @@ export function useTryOnConfig() {
   return useQuery({ queryKey: queryKeys.tryOn, queryFn: api.getTryOnConfig, staleTime: 5 * 60_000, retry: 0 });
 }
 
-/** Les commandes passées depuis ce téléphone, avec leur statut réel demandé au serveur. */
+/** L'historique d'achats du client connecté, tel que le serveur le connaît. */
 export function useMyOrders() {
-  const history = useQuery({ queryKey: queryKeys.myOrders, queryFn: orderHistory.list, staleTime: 0 });
-  const orders = useQueries({
-    queries: (history.data ?? []).map((entry) => ({ queryKey: queryKeys.order(entry.id), queryFn: () => api.getOrder(entry.id) })),
-  });
-  return { history, orders };
+  const { status } = useSession();
+  return useQuery({ queryKey: queryKeys.myOrders, queryFn: api.myOrders, enabled: status === "signedIn", staleTime: 0 });
+}
+
+/**
+ * Le profil du client connecté, rafraîchi auprès du serveur (au lancement et
+ * à chaque retour sur le profil). Une session expirée déconnecte le téléphone.
+ */
+export function useMe() {
+  const { status, user } = useSession();
+  const query = useQuery({ queryKey: queryKeys.me, queryFn: api.me, enabled: status === "signedIn", initialData: user ?? undefined, staleTime: 60_000 });
+  useEffect(() => {
+    if (query.data && status === "signedIn") void session.setUser(query.data);
+  }, [query.data, status]);
+  return query;
+}
+
+/** Déconnexion : le serveur détruit la session, le téléphone oublie tout ce qui est privé. */
+export async function signOut(client: QC) {
+  await api.logout().catch(() => undefined); // hors ligne : on déconnecte quand même ce téléphone
+  await forgetPrivateData(client);
+}
+
+/** Efface du cache les données liées au compte (commandes, profil). */
+export async function forgetPrivateData(client: QC) {
+  await session.signOut();
+  client.removeQueries({ queryKey: queryKeys.myOrders });
+  client.removeQueries({ queryKey: queryKeys.me });
+  client.removeQueries({ queryKey: ["order"] });
 }
 
 /** Une commande vient d'être créée : on la mémorise et on la met en cache. */
@@ -77,6 +104,7 @@ export async function applyPaidOrder(client: QC, order: Order) {
   client.setQueryData(queryKeys.order(order.id), order);
   cart.orderPaid(order.id);
   await Promise.all([
+    client.invalidateQueries({ queryKey: queryKeys.myOrders }),
     client.invalidateQueries({ queryKey: queryKeys.products }),
     ...order.items.map((item) => client.invalidateQueries({ queryKey: queryKeys.product(item.productId) })),
   ]);
