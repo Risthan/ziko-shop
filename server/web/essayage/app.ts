@@ -1,13 +1,10 @@
 // Script de la page /essayage (navigateur ou WebView de l'app).
 // Compilé par esbuild vers public/essayage/app.js.
 //
-// Essayage en direct avec Fal.ai, modèle Lucy VTON Realtime :
-// la caméra part en WebRTC vers le modèle, qui renvoie la vidéo où le client
-// porte le pull choisi. Le SDK officiel gère la signalisation et le WebRTC.
-import { fal } from "@fal-ai/client";
-import { lucyRealtime } from "@fal-ai/client/realtime/lucy";
-
-const ENDPOINT = "decart/lucy2-vton/realtime";
+// Essayage en direct avec iKawn Mirror (capacité « tryon ») : la caméra part
+// en WebRTC vers le service, qui renvoie la vidéo où le client porte le pull.
+// Le SDK officiel est chargé depuis iKawn (mis en cache par le navigateur).
+import { createMirrorClient, prepareMirrorRuntime, type MirrorLive } from "https://api.ikawn.com/sdk/mirror.js";
 
 interface Product {
   id: string;
@@ -15,21 +12,7 @@ interface Product {
   imageUrl: string | null;
 }
 
-interface GarmentInput extends Record<string, unknown> {
-  prompt: string;
-  reference_image_url: string;
-}
-
-const MODEL_DESCRIPTIONS: Record<string, string> = {
-  "Le Classique": "crewneck sweatshirt in heavyweight brushed cotton fleece with ribbed collar, cuffs and hem",
-  "L'Essentiel": "hoodie in heavyweight cotton fleece with a hood without drawstrings and a kangaroo pocket",
-  "Le Signature": "half-zip knit pullover with a ribbed stand-up collar and a gunmetal metal zipper",
-};
-const COLORS: Record<string, { english: string; swatch: string; logo: string }> = {
-  noir: { english: "black", swatch: "#141414", logo: "off-white" },
-  creme: { english: "cream", swatch: "#E8E0D2", logo: "black" },
-  moka: { english: "dark mocha brown", swatch: "#4E3629", logo: "off-white" },
-};
+const COLORS: Record<string, string> = { noir: "#141414", creme: "#E8E0D2", moka: "#4E3629" };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const output = $<HTMLVideoElement>("output");
@@ -64,19 +47,24 @@ let products: Product[] = [];
 let current: Product | null = null;
 let maxSessionSeconds = 30;
 let camera: MediaStream | null = null;
-let session: ReturnType<typeof openSession> | null = null;
+let session: MirrorLive | null = null;
 let countdown: number | undefined;
-/** Vrai quand c'est NOUS qui fermons la séance (fin du temps, changement d'onglet). */
-let closingOnPurpose = false;
+/** Une seule mise à jour du vêtement à la fois (recommandation iKawn). */
+let pendingUpdate: Promise<unknown> = Promise.resolve();
+/** Un seul message d'erreur par séance : la première cause connue. */
+let failureShown = false;
 /**
- * Service complet (« Concurrent session limit reached ») : on réessaie un peu
- * plus tard, caméra allumée, au plus MAX_CAPACITY_RETRIES fois. Une séance
- * refusée ne produit pas de vidéo, donc n'est pas facturée.
+ * Service occupé (le compte n'accepte qu'une séance active à la fois) : on
+ * réessaie un peu plus tard, caméra allumée, au plus MAX_BUSY_RETRIES fois.
+ * Une séance refusée n'est pas facturée.
  */
-const MAX_CAPACITY_RETRIES = 2;
-const CAPACITY_RETRY_DELAY_MS = 8_000;
-let capacityRetries = 0;
+const MAX_BUSY_RETRIES = 2;
+const BUSY_RETRY_DELAY_MS = 8_000;
+let busyRetries = 0;
 let retryTimer: number | undefined;
+
+// Prépare le moteur du SDK dès l'ouverture : ne crée ni ne facture aucune séance.
+const runtimeReady = prepareMirrorRuntime();
 
 const normalize = (text: string) =>
   text
@@ -96,132 +84,60 @@ function say(text: string, isError = false) {
   if (isError) notify("error", text);
 }
 
-/** Consigne courte pour le modèle : le pull de la photo, sa couleur et son logo. */
-function promptFor(product: Product): string {
-  const { model, color } = split(product.name);
-  const palette = COLORS[normalize(color)];
-  const description = MODEL_DESCRIPTIONS[model] ?? "sweater";
-  return `Substitute the current top with the ${palette?.english ?? ""} ${description} from the reference image, matching its color, material and fit, with the small ${palette?.logo ?? "embroidered"} embroidered "Ziko Shop" logo on the chest.`
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * Photo du pull pour le modèle. En ligne (HTTPS), une simple adresse publique
- * suffit : Fal la télécharge. En local, Fal ne peut pas joindre notre machine,
- * donc on envoie l'image elle-même (data URI).
- */
-async function referenceFor(product: Product): Promise<string> {
-  const url = new URL(product.imageUrl ?? "", location.origin);
-  const isPublic = url.protocol === "https:" && !["localhost", "127.0.0.1"].includes(url.hostname);
-  if (isPublic) return url.href;
-  const blob = await (await fetch(url)).blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function garmentInput(product: Product): Promise<GarmentInput> {
-  return { prompt: promptFor(product), reference_image_url: await referenceFor(product) };
-}
-
-/** Jeton temporaire demandé à NOTRE serveur : la clé Fal n'arrive jamais ici. */
-async function fetchToken(): Promise<string> {
-  const response = await fetch("/try-on/token", { method: "POST" });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(body?.error?.message ?? "Le service d'essayage est indisponible.");
-  }
-  return response.text();
-}
-
-function openSession(input: GarmentInput, stream: MediaStream) {
-  return fal.realtime.open(lucyRealtime<GarmentInput>({ endpoints: [ENDPOINT] }), {
-    endpointId: ENDPOINT,
-    input,
-    localStream: stream,
-    tokenProvider: fetchToken,
-    tokenExpirationSeconds: 120,
-    negotiationTimeoutMs: 20_000,
-    onMedia: (remote) => {
-      // La vidéo transformée remplace l'aperçu de la caméra.
-      output.srcObject = remote;
-      void output.play().catch(() => undefined);
-      output.classList.remove("preview");
-      garment.hidden = true;
-      overlay.hidden = true;
-      live.hidden = false;
-      say("");
-      notify("live");
-      capacityRetries = 0;
-      // Une renégociation peut republier la vidéo : le compte à rebours ne repart pas de zéro.
-      if (countdown === undefined) startCountdown(maxSessionSeconds);
-    },
-    onState: (state) => {
-      if (state === "failed") {
-        // L'erreur précise (onError) arrive juste après : on lui laisse la priorité.
-        window.setTimeout(
-          () => fail(navigator.onLine ? "La connexion au service d'essayage a été interrompue." : "Connexion internet perdue. Vérifiez votre réseau, puis relancez."),
-          300,
-        );
-      } else if (state === "closed" && !closingOnPurpose) {
-        stop();
-        say("La séance d'essayage s'est terminée.");
-        notify("ended");
-      }
-    },
-    onError: (error) => {
-      const reason = error instanceof Error ? error.message : String(error);
-      console.warn("[essayage] Fal :", reason); // utile au diagnostic, sans donnée personnelle
-      if (/concurrent session limit/i.test(reason) && capacityRetries < MAX_CAPACITY_RETRIES) retryLater();
-      else fail(explain(reason));
-    },
-  });
-}
-
-/** Le service est complet : nouvelle tentative dans quelques secondes, sans éteindre la caméra. */
-function retryLater() {
-  capacityRetries += 1;
-  failureShown = true; // l'échec de CETTE tentative ne s'affiche pas comme une erreur
-  closingOnPurpose = true;
-  const closing = session;
-  session = null;
-  void closing?.close();
-  overlay.hidden = false;
-  overlayText.textContent = "Le service d'essayage est très demandé. Nouvelle tentative dans quelques secondes…";
-  window.clearTimeout(retryTimer);
-  retryTimer = window.setTimeout(() => {
-    if (!camera || !current) return;
-    failureShown = false;
-    closingOnPurpose = false;
-    void garmentInput(current)
-      .then((input) => {
-        if (camera) session = openSession(input, camera);
-      })
-      .catch(() => fail("Le service d'essayage ne répond pas pour le moment."));
-  }, CAPACITY_RETRY_DELAY_MS);
-}
-
-/** Traduit une erreur du service en message clair pour le client. */
-function explain(reason: string): string {
-  if (/concurrent session limit/i.test(reason)) {
-    return "Le service d'essayage est très demandé en ce moment. Réessayez dans une minute.";
-  }
-  if (/indisponible|activé|Patientez/.test(reason)) return reason; // messages de notre API, déjà clairs
-  if (!navigator.onLine) return "Connexion internet perdue. Vérifiez votre réseau, puis relancez.";
-  return "Le service d'essayage ne répond pas pour le moment.";
-}
-
-/** Un seul message d'erreur par séance : le plus précis (la première cause connue). */
-let failureShown = false;
 function fail(text: string) {
   if (failureShown) return;
   failureShown = true;
   stop();
   say(text, true);
+}
+
+/**
+ * Photo du pull, sous forme de fichier pour le SDK. Le même objet est
+ * réutilisé pour un même pull : iKawn ne le renvoie pas une seconde fois.
+ */
+const garmentFiles = new Map<string, Promise<File>>();
+function garmentFile(product: Product): Promise<File> {
+  let file = garmentFiles.get(product.id);
+  if (!file) {
+    file = fetch(product.imageUrl ?? "")
+      .then((response) => {
+        if (!response.ok) throw new Error("Photo du pull introuvable.");
+        return response.blob();
+      })
+      .then((blob) => new File([blob], `${product.id}.jpg`, { type: blob.type || "image/jpeg" }));
+    file.catch(() => garmentFiles.delete(product.id));
+    garmentFiles.set(product.id, file);
+  }
+  return file;
+}
+
+/** Traduit une erreur en message clair pour le client. */
+function explain(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string } | null)?.code ?? "";
+  if (/indisponible|activé|Patientez|autre client/i.test(text)) return text; // messages de notre API, déjà clairs
+  if (!navigator.onLine || code === "NETWORK_ERROR") return "Connexion internet perdue. Vérifiez votre réseau, puis relancez.";
+  if (code === "SESSION_TERMINAL" || code === "DISCONNECTED") return "La séance d'essayage s'est terminée.";
+  return "Le service d'essayage ne répond pas pour le moment.";
+}
+
+/** Notre serveur crée la séance chez iKawn : la clé ne vient jamais ici. */
+function sessionProvider(requestKey: string) {
+  return async ({ capability }: { capability: string }) => {
+    const response = await fetch("/try-on/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey },
+      body: JSON.stringify({ capability }),
+      cache: "no-store",
+    });
+    const body = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+    if (!response.ok) {
+      const error = new Error(body?.error?.message ?? "Le service d'essayage est indisponible.") as Error & { code?: string };
+      error.code = body?.error?.code;
+      throw error;
+    }
+    return body as Record<string, unknown>;
+  };
 }
 
 function showProduct(product: Product) {
@@ -243,7 +159,7 @@ function showProduct(product: Product) {
       button.setAttribute("aria-label", `Couleur ${variantColor}`);
       button.setAttribute("aria-pressed", String(variant.id === product.id));
       const dot = document.createElement("span");
-      dot.style.background = COLORS[normalize(variantColor)]?.swatch ?? "#ccc";
+      dot.style.background = COLORS[normalize(variantColor)] ?? "#ccc";
       button.append(dot);
       button.addEventListener("click", () => void select(variant.id));
       return button;
@@ -252,50 +168,56 @@ function showProduct(product: Product) {
 }
 
 /**
- * Changer de pull PENDANT la séance : on envoie la nouvelle photo et la
- * nouvelle consigne au modèle, sans couper la vidéo ni reconnecter.
+ * Changer de pull PENDANT la séance : on envoie la nouvelle photo au service
+ * (live.set), sans couper la vidéo ni reconnecter.
  */
 async function select(productId: string) {
   const product = products.find((item) => item.id === productId);
   if (!product || product.id === current?.id) return;
   showProduct(product);
+  void garmentFile(product); // téléchargement anticipé
   if (!session) return;
-  try {
-    session.send(await garmentInput(product));
-  } catch {
-    say("Impossible de changer de pull pour l'instant.", true);
-  }
+  const target = session;
+  pendingUpdate = pendingUpdate
+    .catch(() => undefined)
+    .then(async () => target.set({ referenceImage: await garmentFile(product) }))
+    .catch(() => say("Impossible de changer de pull pour l'instant.", true));
+  await pendingUpdate;
 }
 
-async function start() {
+async function start(automatic = false) {
   if (!current || session) return;
   startButton.disabled = true;
-  closingOnPurpose = false;
   failureShown = false;
-  capacityRetries = 0; // nouvel essai lancé par le client : les tentatives repartent de zéro
+  if (!automatic) busyRetries = 0;
   say("Connexion à la caméra…");
   notify("ready");
 
-  try {
-    camera = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 25, max: 30 } },
-    });
-  } catch (error) {
-    startButton.disabled = false;
-    const name = error instanceof DOMException ? error.name : "";
-    say(
-      name === "NotAllowedError" || name === "SecurityError"
-        ? "Accès à la caméra refusé. Autorisez la caméra pour Ziko Shop, puis relancez."
-        : name === "NotFoundError" || name === "OverconstrainedError"
-          ? "Aucune caméra frontale disponible sur cet appareil."
-          : "Impossible d'ouvrir la caméra. Fermez les autres apps qui l'utilisent, puis relancez.",
-      true,
-    );
-    return;
+  if (!camera) {
+    try {
+      camera = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+    } catch (error) {
+      startButton.disabled = false;
+      const name = error instanceof DOMException ? error.name : "";
+      say(
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Accès à la caméra refusé. Autorisez la caméra pour Ziko Shop, puis relancez."
+          : name === "NotFoundError" || name === "OverconstrainedError"
+            ? "Aucune caméra frontale disponible sur cet appareil."
+            : "Impossible d'ouvrir la caméra. Fermez les autres apps qui l'utilisent, puis relancez.",
+        true,
+      );
+      return;
+    }
   }
 
-  // Le client se voit tout de suite pendant que la connexion s'établit.
+  // Le client se voit tout de suite pendant que la séance s'ouvre.
+  output.autoplay = true;
+  output.playsInline = true;
+  output.muted = true;
   output.srcObject = camera;
   output.classList.add("preview");
   void output.play().catch(() => undefined);
@@ -305,14 +227,52 @@ async function start() {
   say("");
 
   try {
-    session = openSession(await garmentInput(current), camera);
-  } catch {
-    stop();
-    say("Le service d'essayage ne répond pas pour le moment.", true);
-    return;
+    await runtimeReady;
+    const reference = await garmentFile(current);
+    // Une clé par tentative de connexion : un renvoi réseau ne crée pas de seconde séance.
+    const mirror = createMirrorClient({
+      sessionProvider: sessionProvider(crypto.randomUUID()),
+      onError: (error) => {
+        console.warn("[essayage] iKawn :", error.code ?? "", error.message); // diagnostic, sans donnée personnelle
+        fail(explain(error));
+      },
+    });
+    const stream = camera;
+    if (!stream) return;
+    session = await mirror.connect(stream, {
+      capability: "tryon",
+      referenceImage: reference,
+      // Pas de consigne : iKawn remplace seulement le vêtement par celui de la photo.
+      onRemoteStream: (remote) => {
+        output.srcObject = remote;
+        output.classList.remove("preview");
+        void output.play().catch(() => say("Touchez la vidéo pour la lancer."));
+        overlay.hidden = true;
+        live.hidden = false;
+        busyRetries = 0;
+        say("");
+        notify("live");
+        // Une reconnexion peut republier la vidéo : le compte à rebours ne repart pas de zéro.
+        if (countdown === undefined) startCountdown(maxSessionSeconds);
+      },
+    });
+    stopButton.hidden = false;
+    startButton.hidden = true;
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code === "TRYON_BUSY" && busyRetries < MAX_BUSY_RETRIES) return retryLater();
+    fail(explain(error));
   }
-  stopButton.hidden = false;
-  startButton.hidden = true;
+}
+
+/** Service occupé : nouvelle tentative dans quelques secondes, caméra allumée. */
+function retryLater() {
+  busyRetries += 1;
+  session = null;
+  overlay.hidden = false;
+  overlayText.textContent = "Le service d'essayage est très demandé. Nouvelle tentative dans quelques secondes…";
+  window.clearTimeout(retryTimer);
+  retryTimer = window.setTimeout(() => void start(true), BUSY_RETRY_DELAY_MS);
 }
 
 function startCountdown(seconds: number) {
@@ -332,14 +292,14 @@ function startCountdown(seconds: number) {
   }, 1000);
 }
 
+/** Arrête la séance iKawn (fin de facturation) et la caméra. */
 function stop() {
-  closingOnPurpose = true;
   window.clearInterval(countdown);
   countdown = undefined;
   window.clearTimeout(retryTimer);
   const closing = session;
   session = null;
-  void closing?.close();
+  void closing?.disconnect().catch(() => undefined);
   camera?.getTracks().forEach((track) => track.stop());
   camera = null;
   output.srcObject = null;
@@ -354,7 +314,7 @@ function stop() {
   startButton.disabled = false;
 }
 
-type TryOnConfig = { mode: "fal"; maxSessionSeconds: number } | { mode: "off" };
+type TryOnConfig = { mode: "ikawn"; maxSessionSeconds: number } | { mode: "off" };
 
 async function init() {
   const productId = new URLSearchParams(location.search).get("produit");
@@ -367,7 +327,7 @@ async function init() {
     if (!product) throw new Error();
     showProduct(product);
 
-    if (config.mode !== "fal") {
+    if (config.mode !== "ikawn") {
       say("L'essayage en direct n'est pas encore activé sur cette boutique.", true);
       return;
     }
@@ -376,6 +336,7 @@ async function init() {
       say("Cet appareil ne permet pas l'essayage vidéo en direct.", true);
       return;
     }
+    void garmentFile(product); // la photo est prête avant le lancement
     startButton.disabled = false;
     notify("ready");
     if (embedded) void start(); // dans l'app : lancement automatique, sans bouton à toucher
@@ -397,6 +358,7 @@ stopButton.addEventListener("click", () => {
   stop();
   notify("ended");
 });
+// Quitter la page (ou l'onglet Essayage de l'app) arrête la séance : elle n'est plus facturée.
 window.addEventListener("pagehide", stop);
 window.addEventListener("offline", () => {
   if (session) say("Connexion internet perdue. L'essayage reprendra si le réseau revient vite.");

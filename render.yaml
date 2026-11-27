@@ -20,8 +20,8 @@ services:
         generateValue: true
       - key: SEED_ON_START
         value: "true"
-      # Facultatif : active l'essayage en direct via Fal.ai (voir le README).
-      - key: FAL_KEY
+      # Facultatif : active l'essayage en direct via iKawn Mirror (voir le README).
+      - key: IKAWN_API_KEY
         sync: false
 
 databases:

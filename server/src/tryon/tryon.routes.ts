@@ -3,78 +3,89 @@ import { fileURLToPath } from "node:url";
 import express, { Router } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
+import { z } from "zod";
 import { AppError } from "../http/errors.js";
+import { parse } from "../http/validation.js";
 
 /**
  * ESSAYAGE EN DIRECT (fonctionnalité facultative, isolée du reste de l'API).
  *
- * Fournisseur unique : Fal.ai, modèle « Lucy VTON Realtime »
- * (https://fal.ai/models/decart/lucy2-vton/realtime/api).
+ * Fournisseur unique : iKawn Mirror, capacité « tryon »
+ * (https://platform.ikawn.com/documentation/quickstart).
  *
- * - La page /essayage filme le client (caméra frontale) et envoie la vidéo au
- *   modèle en WebRTC ; elle reçoit en retour la vidéo où il porte le pull.
- *   Le SDK officiel `@fal-ai/client` gère la connexion (WebSocket de
- *   signalisation + WebRTC).
- * - La clé FAL_KEY ne quitte JAMAIS le serveur : la page reçoit un jeton
- *   temporaire (POST /try-on/token), valable 2 minutes pour ouvrir une
- *   séance, et limité à ce seul modèle.
- * - Coût maîtrisé : Fal facture la seconde de vidéo produite, donc une
- *   séance dure au plus MAX_SESSION_SECONDS et les jetons sont limités par
- *   adresse IP.
+ * - La page /essayage filme le client et lui fait porter le pull en direct
+ *   grâce au SDK officiel (https://api.ikawn.com/sdk/mirror.js), en WebRTC.
+ * - La clé IKAWN_API_KEY ne quitte JAMAIS le serveur : la page demande une
+ *   séance à POST /try-on/session, qui la crée chez iKawn (POST /v1/sessions)
+ *   et ne renvoie que les identifiants limités à cette séance.
+ * - Coût maîtrisé : iKawn facture le temps de séance active. Une séance dure
+ *   au plus MAX_SESSION_SECONDS : la page l'arrête, et le serveur demande
+ *   lui-même la fin de la séance à iKawn juste après (filet de sécurité).
  *
- * Sans FAL_KEY, l'essayage est désactivé et l'app propose simplement de commander.
+ * Sans IKAWN_API_KEY, l'essayage est désactivé et l'app propose simplement de commander.
  */
-export const FAL_ENDPOINT = "decart/lucy2-vton/realtime";
-/** Nom de l'app autorisée dans le jeton Fal (l'identifiant sans le propriétaire ni le chemin). */
-const FAL_APP_ALIAS = "lucy2-vton";
-const FAL_TOKEN_URL = "https://rest.fal.ai/tokens/";
-const TOKEN_EXPIRATION_SECONDS = 120;
+export const IKAWN_API_BASE = "https://api.ikawn.com/v1";
+export const IKAWN_SDK_ORIGIN = "https://api.ikawn.com";
 export const MAX_SESSION_SECONDS = 30;
+/** Délai avant que le serveur ne termine lui-même la séance (fin normale + marge). */
+const SERVER_END_DELAY_MS = (MAX_SESSION_SECONDS + 8) * 1000;
 
 const PAGE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../public/essayage");
 
-export type TryOnMode = "fal" | "off";
+export type TryOnMode = "ikawn" | "off";
 
-export function tryOnMode(falKey: string): TryOnMode {
-  return falKey ? "fal" : "off";
+export function tryOnMode(ikawnApiKey: string): TryOnMode {
+  return ikawnApiKey ? "ikawn" : "off";
 }
 
-/** Demande à Fal un jeton temporaire, limité au modèle d'essayage. */
-export async function createFalToken(falKey: string, fetchImpl: typeof fetch = fetch): Promise<string> {
-  const response = await fetchImpl(FAL_TOKEN_URL, {
-    method: "POST",
-    headers: { Authorization: `Key ${falKey}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ allowed_apps: [FAL_APP_ALIAS], token_expiration: TOKEN_EXPIRATION_SECONDS }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) {
-    throw new Error(`Fal a refusé la création du jeton (HTTP ${response.status})`);
-  }
-  const token: unknown = await response.json();
-  // Fal renvoie le jeton sous forme de chaîne JSON.
-  if (typeof token === "string" && token.length > 0) return token;
-  if (token && typeof token === "object" && typeof (token as { detail?: unknown }).detail === "string") {
-    return (token as { detail: string }).detail;
-  }
-  throw new Error("Réponse inattendue de Fal pour le jeton");
+/** Même format qu'iKawn : 8 à 128 lettres, chiffres, _ ou -. Une clé par tentative de connexion. */
+const idempotencyKeySchema = z
+  .string({ error: "L'en-tête Idempotency-Key est obligatoire." })
+  .regex(/^[A-Za-z0-9_-]{8,128}$/, "L'en-tête Idempotency-Key doit faire 8 à 128 caractères (lettres, chiffres, - ou _).");
+
+interface IkawnSession {
+  id?: string;
+  status?: string;
+  [key: string]: unknown;
 }
 
-export function tryOnRouter(falKey: string, fetchImpl: typeof fetch = fetch): Router {
+export interface TryOnOptions {
+  fetchImpl?: typeof fetch;
+  /** Délai avant la fin forcée côté serveur (modifiable pour les tests). */
+  serverEndDelayMs?: number;
+}
+
+/** Messages clairs pour le client, selon la réponse d'iKawn (voir « Errors and support »). */
+function upstreamError(status: number): AppError {
+  if (status === 402) {
+    return new AppError(503, "TRYON_UNAVAILABLE", "L'essayage en direct est momentanément indisponible. Vous pouvez quand même commander ce pull.");
+  }
+  if (status === 429 || status === 409) {
+    return new AppError(429, "TRYON_BUSY", "Un autre client essaie un pull en ce moment. Réessayez dans un instant.");
+  }
+  return new AppError(502, "UPSTREAM_ERROR", "Le service d'essayage est momentanément indisponible.");
+}
+
+export function tryOnRouter(ikawnApiKey: string, options: TryOnOptions = {}): Router {
   const router = Router();
-  const mode = tryOnMode(falKey);
+  const mode = tryOnMode(ikawnApiKey);
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const endDelay = options.serverEndDelayMs ?? SERVER_END_DELAY_MS;
 
-  // La page charge son script, accède à la caméra et parle à Fal : on n'ouvre
-  // que le strict nécessaire, pour cette page seulement.
+  // La page charge son script et le SDK iKawn (avec son moteur WebAssembly),
+  // accède à la caméra et se connecte au service : uniquement sur cette page.
+  // L'adresse de signalisation WebRTC est fournie par iKawn à chaque séance,
+  // d'où connect-src https:/wss:.
   const pageSecurity = helmet.contentSecurityPolicy({
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
+      scriptSrc: ["'self'", IKAWN_SDK_ORIGIN, "'wasm-unsafe-eval'"],
       styleSrc: ["'self'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "blob:"],
       mediaSrc: ["'self'", "blob:", "mediastream:"],
-      // Le jeton vient de notre API ; la signalisation passe par le WebSocket de Fal.
-      connectSrc: ["'self'", "wss://fal.run", "https://fal.run"],
+      connectSrc: ["'self'", "https:", "wss:"],
+      workerSrc: ["'self'", "blob:"],
       frameSrc: ["'none'"],
       // L'app mobile affiche la page dans une WebView (pas un cadre) : aucun site ne peut l'intégrer.
       frameAncestors: ["'none'"],
@@ -94,10 +105,11 @@ export function tryOnRouter(falKey: string, fetchImpl: typeof fetch = fetch): Ro
 
   // La page (et l'app) demandent si l'essayage est disponible.
   router.get("/try-on/config", (_req, res) => {
-    res.json(mode === "fal" ? { mode, maxSessionSeconds: MAX_SESSION_SECONDS } : { mode });
+    res.json(mode === "ikawn" ? { mode, maxSessionSeconds: MAX_SESSION_SECONDS } : { mode });
   });
 
-  const tokenLimiter = rateLimit({
+  // 6 séances par minute et par adresse IP (iKawn en accepte 10 par minute et par clé).
+  const sessionLimiter = rateLimit({
     windowMs: 60_000,
     limit: 6,
     standardHeaders: "draft-8",
@@ -107,20 +119,54 @@ export function tryOnRouter(falKey: string, fetchImpl: typeof fetch = fetch): Ro
     },
   });
 
-  // Jeton temporaire pour ouvrir UNE séance. Renvoyé en texte brut : c'est le
-  // format attendu par le `tokenProvider` du SDK Fal.
-  router.post("/try-on/token", tokenLimiter, async (_req, res) => {
-    if (!falKey) {
+  /** Demande à iKawn la fin d'une séance (sans attendre ni échouer bruyamment). */
+  const endSession = (sessionId: string) =>
+    fetchImpl(`${IKAWN_API_BASE}/sessions/${encodeURIComponent(sessionId)}/end`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ikawnApiKey}`, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => undefined);
+
+  // Crée UNE séance d'essayage chez iKawn et renvoie sa réponse au SDK de la page.
+  // Elle ne contient que des identifiants limités à cette séance, jamais la clé.
+  router.post("/try-on/session", sessionLimiter, async (req, res) => {
+    if (!ikawnApiKey) {
       throw new AppError(503, "FEATURE_DISABLED", "L'essayage en direct n'est pas activé sur ce serveur.");
     }
-    let token: string;
+    const idempotencyKey = parse(idempotencyKeySchema, req.get("idempotency-key"));
+
+    let response: Response;
     try {
-      token = await createFalToken(falKey, fetchImpl);
-    } catch (error) {
-      console.error("Jeton Fal impossible à créer :", error instanceof Error ? error.message : error);
-      throw new AppError(502, "UPSTREAM_ERROR", "Le service d'essayage est momentanément indisponible.");
+      response = await fetchImpl(`${IKAWN_API_BASE}/sessions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ikawnApiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        // Le corps ne contient QUE la capacité : la photo du pull passe par le SDK.
+        body: JSON.stringify({ capability: "tryon" }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      throw upstreamError(504);
     }
-    res.set("Cache-Control", "no-store").type("text/plain").send(token);
+
+    if (!response.ok) {
+      const details = (await response.json().catch(() => null)) as { error?: { code?: string; request_id?: string } } | null;
+      console.error("Séance iKawn refusée :", response.status, details?.error?.code ?? "", details?.error?.request_id ?? "");
+      throw upstreamError(response.status);
+    }
+
+    const session = (await response.json()) as IkawnSession;
+    // Filet de sécurité : même si la page ne s'arrête pas (onglet tué, réseau
+    // coupé), le serveur termine la séance après la durée maximale.
+    if (response.status === 201 && typeof session.id === "string") {
+      const sessionId = session.id;
+      setTimeout(() => void endSession(sessionId), endDelay).unref();
+    }
+    res.set("Cache-Control", "no-store").status(response.status).json(session);
   });
 
   return router;

@@ -29,11 +29,11 @@ const envSchema = z.object({
   /** Origines autorisées pour CORS, séparées par des virgules ("*" = toutes). */
   CORS_ORIGINS: z.string().default("*"),
   /**
-   * Clé Fal.ai (https://fal.ai/dashboard/keys) pour l'essayage en direct
-   * (modèle Lucy VTON Realtime). Facultative : sans elle, l'essayage est
-   * simplement désactivé. Elle ne quitte jamais le serveur.
+   * Clé iKawn Mirror (https://platform.ikawn.com) pour l'essayage en direct.
+   * Facultative : sans elle, l'essayage est simplement désactivé. Elle ne
+   * quitte jamais le serveur.
    */
-  FAL_KEY: z.string().default(""),
+  IKAWN_API_KEY: z.string().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);

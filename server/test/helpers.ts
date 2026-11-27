@@ -22,7 +22,7 @@ export function startApp(db: Db): Server {
     NODE_ENV: "test",
     ADMIN_API_KEY: ADMIN_KEY,
     CORS_ORIGINS: "*",
-    FAL_KEY: "",
+    IKAWN_API_KEY: "",
   });
   return app.listen(0);
 }

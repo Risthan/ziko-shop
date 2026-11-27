@@ -15,7 +15,7 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await resetDb(db);
-  server = startApp(db); // sans clé Decart
+  server = startApp(db); // sans clé iKawn
 });
 afterEach(() => {
   server.close();
@@ -28,13 +28,13 @@ describe("Santé et fonctionnalités", () => {
     expect(res.body).toEqual({ status: "ok" });
   });
 
-  it("GET /features indique que l'essayage en direct est désactivé sans clé Decart", async () => {
+  it("GET /features indique que l'essayage en direct est désactivé sans clé iKawn", async () => {
     const res = await request(server).get("/features");
     expect(res.body).toEqual({ liveTryOn: false });
   });
 
-  it("POST /try-on/token refuse proprement quand l'essayage n'est pas configuré", async () => {
-    const res = await request(server).post("/try-on/token");
+  it("POST /try-on/session refuse proprement quand l'essayage n'est pas configuré", async () => {
+    const res = await request(server).post("/try-on/session").set("Idempotency-Key", "cle-essai-0001");
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe("FEATURE_DISABLED");
   });

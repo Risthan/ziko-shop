@@ -16,7 +16,7 @@ import { tryOnRouter } from "./tryon/tryon.routes.js";
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
 
-export type AppConfig = Pick<Config, "NODE_ENV" | "ADMIN_API_KEY" | "CORS_ORIGINS" | "FAL_KEY">;
+export type AppConfig = Pick<Config, "NODE_ENV" | "ADMIN_API_KEY" | "CORS_ORIGINS" | "IKAWN_API_KEY">;
 
 export function createApp(db: Db, config: AppConfig): express.Express {
   const app = express();
@@ -64,7 +64,7 @@ export function createApp(db: Db, config: AppConfig): express.Express {
 
   // Fonctionnalités facultatives activées sur ce serveur (l'app adapte son interface).
   app.get("/features", (_req, res) => {
-    res.json({ liveTryOn: config.FAL_KEY.length > 0 });
+    res.json({ liveTryOn: config.IKAWN_API_KEY.length > 0 });
   });
 
   app.use("/products", productsRouter(db, config.ADMIN_API_KEY));
@@ -72,7 +72,7 @@ export function createApp(db: Db, config: AppConfig): express.Express {
   app.use(authRouter(db));
   app.use("/orders", ordersRouter(db));
   // Facultatif et isolé : essayage en direct (voir src/tryon).
-  app.use(tryOnRouter(config.FAL_KEY));
+  app.use(tryOnRouter(config.IKAWN_API_KEY));
 
   app.use(notFoundHandler);
   app.use(errorHandler);
