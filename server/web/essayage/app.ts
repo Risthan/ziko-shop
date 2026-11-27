@@ -68,6 +68,15 @@ let session: ReturnType<typeof openSession> | null = null;
 let countdown: number | undefined;
 /** Vrai quand c'est NOUS qui fermons la séance (fin du temps, changement d'onglet). */
 let closingOnPurpose = false;
+/**
+ * Service complet (« Concurrent session limit reached ») : on réessaie un peu
+ * plus tard, caméra allumée, au plus MAX_CAPACITY_RETRIES fois. Une séance
+ * refusée ne produit pas de vidéo, donc n'est pas facturée.
+ */
+const MAX_CAPACITY_RETRIES = 2;
+const CAPACITY_RETRY_DELAY_MS = 8_000;
+let capacityRetries = 0;
+let retryTimer: number | undefined;
 
 const normalize = (text: string) =>
   text
@@ -147,13 +156,17 @@ function openSession(input: GarmentInput, stream: MediaStream) {
       live.hidden = false;
       say("");
       notify("live");
+      capacityRetries = 0;
       // Une renégociation peut republier la vidéo : le compte à rebours ne repart pas de zéro.
       if (countdown === undefined) startCountdown(maxSessionSeconds);
     },
     onState: (state) => {
       if (state === "failed") {
-        stop();
-        say(navigator.onLine ? "La connexion au service d'essayage a été interrompue." : "Connexion internet perdue. Vérifiez votre réseau, puis relancez.", true);
+        // L'erreur précise (onError) arrive juste après : on lui laisse la priorité.
+        window.setTimeout(
+          () => fail(navigator.onLine ? "La connexion au service d'essayage a été interrompue." : "Connexion internet perdue. Vérifiez votre réseau, puis relancez."),
+          300,
+        );
       } else if (state === "closed" && !closingOnPurpose) {
         stop();
         say("La séance d'essayage s'est terminée.");
@@ -161,11 +174,54 @@ function openSession(input: GarmentInput, stream: MediaStream) {
       }
     },
     onError: (error) => {
-      const text = error instanceof Error && /indisponible|activé|Patientez/.test(error.message) ? error.message : "Le service d'essayage ne répond pas pour le moment.";
-      stop();
-      say(text, true);
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn("[essayage] Fal :", reason); // utile au diagnostic, sans donnée personnelle
+      if (/concurrent session limit/i.test(reason) && capacityRetries < MAX_CAPACITY_RETRIES) retryLater();
+      else fail(explain(reason));
     },
   });
+}
+
+/** Le service est complet : nouvelle tentative dans quelques secondes, sans éteindre la caméra. */
+function retryLater() {
+  capacityRetries += 1;
+  failureShown = true; // l'échec de CETTE tentative ne s'affiche pas comme une erreur
+  closingOnPurpose = true;
+  const closing = session;
+  session = null;
+  void closing?.close();
+  overlay.hidden = false;
+  overlayText.textContent = "Le service d'essayage est très demandé. Nouvelle tentative dans quelques secondes…";
+  window.clearTimeout(retryTimer);
+  retryTimer = window.setTimeout(() => {
+    if (!camera || !current) return;
+    failureShown = false;
+    closingOnPurpose = false;
+    void garmentInput(current)
+      .then((input) => {
+        if (camera) session = openSession(input, camera);
+      })
+      .catch(() => fail("Le service d'essayage ne répond pas pour le moment."));
+  }, CAPACITY_RETRY_DELAY_MS);
+}
+
+/** Traduit une erreur du service en message clair pour le client. */
+function explain(reason: string): string {
+  if (/concurrent session limit/i.test(reason)) {
+    return "Le service d'essayage est très demandé en ce moment. Réessayez dans une minute.";
+  }
+  if (/indisponible|activé|Patientez/.test(reason)) return reason; // messages de notre API, déjà clairs
+  if (!navigator.onLine) return "Connexion internet perdue. Vérifiez votre réseau, puis relancez.";
+  return "Le service d'essayage ne répond pas pour le moment.";
+}
+
+/** Un seul message d'erreur par séance : le plus précis (la première cause connue). */
+let failureShown = false;
+function fail(text: string) {
+  if (failureShown) return;
+  failureShown = true;
+  stop();
+  say(text, true);
 }
 
 function showProduct(product: Product) {
@@ -215,6 +271,8 @@ async function start() {
   if (!current || session) return;
   startButton.disabled = true;
   closingOnPurpose = false;
+  failureShown = false;
+  capacityRetries = 0; // nouvel essai lancé par le client : les tentatives repartent de zéro
   say("Connexion à la caméra…");
   notify("ready");
 
@@ -278,6 +336,7 @@ function stop() {
   closingOnPurpose = true;
   window.clearInterval(countdown);
   countdown = undefined;
+  window.clearTimeout(retryTimer);
   const closing = session;
   session = null;
   void closing?.close();
