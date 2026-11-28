@@ -177,6 +177,52 @@ describe("POST /orders avec un panier (plusieurs articles)", () => {
   });
 });
 
+describe("Tailles (S à XXL)", () => {
+  it("enregistre la taille de chaque article et la renvoie", async () => {
+    const noir = await insertProduct(db, { name: "Le Classique — Noir", stock: 5 });
+    const rouge = await insertProduct(db, { name: "L'Essentiel — Rouge", stock: 5 });
+
+    const res = await request(server)
+      .post("/orders")
+      .send({ items: [{ productId: noir.id, quantity: 1, size: "L" }, { productId: rouge.id, quantity: 2, size: "XXL" }] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.order.items).toMatchObject([
+      { productId: noir.id, size: "L" },
+      { productId: rouge.id, size: "XXL" },
+    ]);
+    const again = await request(server).get(`/orders/${res.body.order.id}`);
+    expect(again.body.order.items.map((item: { size: string }) => item.size)).toEqual(["L", "XXL"]);
+  });
+
+  it("une commande sans taille (format de l'énoncé) reste valide : taille null", async () => {
+    const product = await insertProduct(db);
+    const res = await request(server).post("/orders").send({ productId: product.id, quantity: 1 });
+    expect(res.status).toBe(201);
+    expect(res.body.order.items[0].size).toBeNull();
+  });
+
+  it("refuse une taille inconnue", async () => {
+    const product = await insertProduct(db);
+    const res = await request(server).post("/orders").send({ productId: product.id, quantity: 1, size: "XXXL" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(res.body.error.message).toContain("S, M, L, XL, XXL");
+  });
+
+  it("la même clé d'idempotence avec une autre taille est refusée (ce n'est pas la même commande)", async () => {
+    const product = await insertProduct(db);
+    const send = (size: string) =>
+      request(server).post("/orders").set("Idempotency-Key", "taille-abc-123").send({ productId: product.id, quantity: 1, size });
+
+    expect((await send("M")).status).toBe(201);
+    expect((await send("M")).status).toBe(200);
+    const other = await send("L");
+    expect(other.status).toBe(422);
+    expect(other.body.error.code).toBe("IDEMPOTENCY_KEY_REUSED");
+  });
+});
+
 describe("GET /orders/:id", () => {
   it("renvoie la commande et son statut", async () => {
     const product = await insertProduct(db, { name: "Le Signature — Crème" });

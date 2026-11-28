@@ -13,6 +13,10 @@ export const paymentIdSchema = z
     "L'identifiant de paiement doit faire 8 à 64 caractères (lettres, chiffres, - ou _).",
   );
 
+/** Les tailles proposées pour chaque pull. */
+export const SIZES = ["S", "M", "L", "XL", "XXL"] as const;
+export type Size = (typeof SIZES)[number];
+
 const itemSchema = z.object({
   productId: z.uuid({ error: "L'identifiant du produit est invalide." }),
   quantity: z
@@ -20,9 +24,11 @@ const itemSchema = z.object({
     .int("La quantité doit être un nombre entier.")
     .min(1, "La quantité doit être d'au moins 1.")
     .max(MAX_QUANTITY, `La quantité ne peut pas dépasser ${MAX_QUANTITY}.`),
+  /** Facultative : une commande sans taille (format de l'énoncé) reste valide. */
+  size: z.enum(SIZES, { error: `La taille doit être l'une de : ${SIZES.join(", ")}.` }).optional(),
 });
 
-/** Panier : plusieurs articles, chaque produit une seule fois (avec sa quantité). */
+/** Panier : plusieurs articles, chaque produit (couleur) une seule fois, avec sa quantité et sa taille. */
 const cartSchema = z.object({
   items: z
     .array(itemSchema, { error: "La liste des articles est invalide." })
@@ -30,7 +36,7 @@ const cartSchema = z.object({
     .max(MAX_ITEMS, `Un panier ne peut pas contenir plus de ${MAX_ITEMS} articles différents.`)
     .refine(
       (items) => new Set(items.map((item) => item.productId)).size === items.length,
-      "Un même produit apparaît deux fois : regroupez les quantités.",
+      "Un même produit apparaît deux fois : regroupez les quantités (une seule taille par couleur et par commande).",
     ),
 });
 
@@ -41,8 +47,8 @@ export interface CreateOrderInput {
 
 /**
  * Deux formats acceptés :
- * - un seul produit : `{ productId, quantity }` (format de l'énoncé) ;
- * - un panier : `{ items: [{ productId, quantity }, …] }`.
+ * - un seul produit : `{ productId, quantity }` (format de l'énoncé), avec `size` en option ;
+ * - un panier : `{ items: [{ productId, quantity, size? }, …] }`.
  */
 export function parseCreateOrder(body: unknown): CreateOrderInput {
   const isCart = typeof body === "object" && body !== null && "items" in body;

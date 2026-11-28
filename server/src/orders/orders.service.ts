@@ -8,6 +8,8 @@ export interface OrderItem {
   productId: string;
   product: { name: string; imageUrl: string | null };
   quantity: number;
+  /** Taille choisie (S à XXL), ou null si la commande n'en précise pas. */
+  size: string | null;
   /** Prix figé au moment de la commande. */
   unitPriceCdf: number;
   lineTotalCdf: number;
@@ -54,6 +56,7 @@ const SELECT_ORDER = `
              'productId', i.product_id,
              'product', json_build_object('name', p.name, 'imageUrl', p.image_url),
              'quantity', i.quantity,
+             'size', i.size,
              'unitPriceCdf', i.unit_price_cdf,
              'lineTotalCdf', i.line_total_cdf
            ) ORDER BY i.position
@@ -167,16 +170,17 @@ export async function createOrder(
       );
       const id = inserted.rows[0]!.id;
       await client.query(
-        `INSERT INTO order_items (order_id, product_id, position, quantity, unit_price_cdf, line_total_cdf)
-         SELECT $1, line.product_id, line.position - 1, line.quantity, line.unit_price_cdf, line.line_total_cdf
-         FROM unnest($2::uuid[], $3::int[], $4::int[], $5::int[])
-              WITH ORDINALITY AS line(product_id, quantity, unit_price_cdf, line_total_cdf, position)`,
+        `INSERT INTO order_items (order_id, product_id, position, quantity, unit_price_cdf, line_total_cdf, size)
+         SELECT $1, line.product_id, line.position - 1, line.quantity, line.unit_price_cdf, line.line_total_cdf, line.size
+         FROM unnest($2::uuid[], $3::int[], $4::int[], $5::int[], $6::text[])
+              WITH ORDINALITY AS line(product_id, quantity, unit_price_cdf, line_total_cdf, size, position)`,
         [
           id,
           lines.map((line) => line.productId),
           lines.map((line) => line.quantity),
           lines.map((line) => line.unitPriceCdf),
           lines.map((line) => line.lineTotalCdf),
+          lines.map((line) => line.size ?? null),
         ],
       );
       return id;
@@ -196,7 +200,10 @@ function assertSameOrder({ order, ownerId }: { order: Order; ownerId: string | n
   const same =
     ownerId === userId &&
     order.items.length === input.items.length &&
-    order.items.every((item, index) => item.productId === input.items[index]!.productId && item.quantity === input.items[index]!.quantity);
+    order.items.every((item, index) => {
+      const sent = input.items[index]!;
+      return item.productId === sent.productId && item.quantity === sent.quantity && item.size === (sent.size ?? null);
+    });
   if (!same) {
     throw new AppError(
       422,
