@@ -13,6 +13,7 @@ import { useSession } from "@/lib/auth/session";
 import { haptics } from "@/lib/haptics";
 import { newIdempotencyKey } from "@/lib/ids";
 import { queryKeys, rememberOrder, useProducts } from "@/lib/queries";
+import type { Size } from "@/lib/sizes";
 import { colors, motion, radius, spacing } from "@/theme";
 import { AppText } from "@/ui/AppText";
 import { Button } from "@/ui/Button";
@@ -24,6 +25,7 @@ import { ProductImage } from "@/ui/ProductImage";
 import { QuantityStepper } from "@/ui/QuantityStepper";
 import { Screen } from "@/ui/Screen";
 import { Sheet } from "@/ui/Sheet";
+import { SizePicker } from "@/ui/SizePicker";
 import { EmptyState, LoadingState } from "@/ui/States";
 
 /**
@@ -60,7 +62,7 @@ export default function CartScreen() {
     const { key, signature } = cart.checkoutKey(newIdempotencyKey);
     try {
       const order = await api.createOrder(
-        rows.map(({ line }) => ({ productId: line.productId, quantity: line.quantity })),
+        rows.map(({ line }) => ({ productId: line.productId, quantity: line.quantity, size: line.size })),
         key,
       );
       cart.markOrdered(key, signature, order.id);
@@ -126,7 +128,7 @@ export default function CartScreen() {
                 exiting={FadeOut.duration(motion.fast)}
                 layout={LinearTransition.duration(motion.base)}
               >
-                <CartRow product={product} quantity={line.quantity} disabled={creating} />
+                <CartRow product={product} quantity={line.quantity} size={line.size} disabled={creating} />
               </Animated.View>
             ))}
 
@@ -186,7 +188,7 @@ export default function CartScreen() {
   );
 }
 
-function CartRow({ product, quantity, disabled }: { product: Product; quantity: number; disabled: boolean }) {
+function CartRow({ product, quantity, size, disabled }: { product: Product; quantity: number; size: Size; disabled: boolean }) {
   const { model, color } = splitProductName(product.name);
   const max = Math.max(1, Math.min(product.stock, MAX_PER_LINE));
   const soldOut = product.stock <= 0;
@@ -231,6 +233,7 @@ function CartRow({ product, quantity, disabled }: { product: Product; quantity: 
             Plus que {product.stock} en stock
           </AppText>
         ) : null}
+        <SizePicker compact value={size} onChange={(next) => cart.setSize(product.id, next)} disabled={disabled || soldOut} />
         <View style={styles.rowBottom}>
           <PressableScale
             onPress={() => router.navigate({ pathname: "/essayage", params: { produit: product.id } })}

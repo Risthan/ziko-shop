@@ -103,7 +103,7 @@ export const api = {
    * Crée une commande pour un ou plusieurs articles (le panier).
    * La clé d'idempotence évite de créer deux commandes si la requête est renvoyée.
    */
-  createOrder: (items: { productId: string; quantity: number }[], idempotencyKey: string) =>
+  createOrder: (items: { productId: string; quantity: number; size?: string }[], idempotencyKey: string) =>
     request<{ order: Order }>("/orders", {
       method: "POST",
       body: { items },

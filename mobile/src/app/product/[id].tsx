@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { PixelRatio, ScrollView, Share, StyleSheet, useWindowDimensions, View } from "react-native";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { ApiError } from "@/api/client";
-import { cart } from "@/lib/cart/useCart";
+import { cart, useCart } from "@/lib/cart/useCart";
 import { modelCopy, variantsOf } from "@/lib/catalog";
 import { formatCdf, splitProductName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { prefetchProductImages } from "@/lib/prefetch";
 import { useProduct, useProducts } from "@/lib/queries";
+import { DEFAULT_SIZE, type Size } from "@/lib/sizes";
 import { colors, fonts, motion, photoBackdrop, radius, spacing } from "@/theme";
 import { AppText } from "@/ui/AppText";
 import { StockBadge } from "@/ui/Badges";
@@ -19,9 +20,11 @@ import { Button, type IconName } from "@/ui/Button";
 import { ColorSwatches } from "@/ui/ColorSwatches";
 import { Header } from "@/ui/Header";
 import { IconButton } from "@/ui/IconButton";
+import { Notice } from "@/ui/Notice";
 import { PressableScale } from "@/ui/PressableScale";
 import { ProductImage } from "@/ui/ProductImage";
 import { Screen } from "@/ui/Screen";
+import { SizePicker } from "@/ui/SizePicker";
 import { EmptyState, LoadingState } from "@/ui/States";
 
 const MAX_CONTENT = 640;
@@ -60,9 +63,18 @@ export default function ProductScreen() {
   const product = useProduct(id);
   const products = useProducts();
   const [addedId, setAddedId] = useState<string | null>(null);
+  const [sizeConflict, setSizeConflict] = useState<{ productId: string; size: Size } | null>(null);
   const { width: windowWidth } = useWindowDimensions();
   const current = product.data;
   const variants = current ? variantsOf(products.data ?? [current], current) : [];
+
+  // Taille : celle déjà au panier pour cette couleur, sinon M. Elle reste choisie quand on change de couleur.
+  const { lines } = useCart();
+  const inCart = lines.find((line) => line.productId === current?.id);
+  const [size, setSize] = useState<Size>(inCart?.size ?? DEFAULT_SIZE);
+  useEffect(() => {
+    if (inCart) setSize(inCart.size);
+  }, [current?.id]); // à l'arrivée sur une couleur seulement : le choix en cours n'est pas écrasé
 
   // Les photos des autres couleurs sont chargées d'avance : changer de couleur est instantané.
   const variantKey = variants.map((variant) => variant.imageUrl).join("|");
@@ -166,13 +178,29 @@ export default function ProductScreen() {
           </View>
         ) : null}
 
+        <View style={styles.section}>
+          <View style={styles.sizeHead}>
+            <AppText variant="bodyStrong">
+              Taille : <AppText variant="body">{size}</AppText>
+            </AppText>
+            <AppText variant="caption">Coupe ample : votre taille habituelle</AppText>
+          </View>
+          <SizePicker
+            value={size}
+            onChange={(next) => {
+              setSize(next);
+              setSizeConflict(null);
+            }}
+          />
+        </View>
+
         <View style={styles.actions}>
           {/* « Commander » reste l'action principale, comme le demande le sujet. */}
           <Button
             title={soldOut ? "Produit épuisé" : "Commander"}
             icon={soldOut ? "close-circle-outline" : "bag-handle-outline"}
             disabled={soldOut}
-            onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: current.id } })}
+            onPress={() => router.push({ pathname: "/order/[productId]", params: { productId: current.id, taille: size } })}
           />
           <View style={styles.actionRow}>
             <Button
@@ -183,8 +211,15 @@ export default function ProductScreen() {
               accessibilityHint="Ajoute ce pull au panier pour commander plusieurs articles"
               style={styles.half}
               onPress={() => {
-                cart.add(current.id, 1, current.stock);
+                const result = cart.add(current.id, 1, current.stock, size);
+                if (result.conflict) {
+                  haptics.error();
+                  setAddedId(null);
+                  setSizeConflict({ productId: current.id, size: result.conflict });
+                  return;
+                }
                 haptics.success();
+                setSizeConflict(null);
                 setAddedId(current.id);
               }}
             />
@@ -198,6 +233,13 @@ export default function ProductScreen() {
             />
           </View>
           {addedId === current.id ? <AddedToCart name={model} /> : null}
+          {sizeConflict?.productId === current.id ? (
+            <Notice
+              tone="warning"
+              title={`Déjà au panier en taille ${sizeConflict.size}`}
+              message={`Une seule taille par couleur et par commande. Changez la taille dans le panier, ou choisissez ${sizeConflict.size} ici.`}
+            />
+          ) : null}
         </View>
 
         <View style={styles.accordions}>
@@ -271,6 +313,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   price: { marginTop: spacing.xs },
   section: { gap: spacing.md },
+  sizeHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: spacing.sm, flexWrap: "wrap" },
   actions: { gap: spacing.md },
   actionRow: { flexDirection: "row", gap: spacing.md },
   headerActions: { flexDirection: "row", gap: spacing.sm },

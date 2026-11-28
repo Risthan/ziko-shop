@@ -10,6 +10,7 @@ import { useSession } from "@/lib/auth/session";
 import { haptics } from "@/lib/haptics";
 import { newIdempotencyKey } from "@/lib/ids";
 import { queryKeys, rememberOrder, useProduct } from "@/lib/queries";
+import { DEFAULT_SIZE, isSize, type Size } from "@/lib/sizes";
 import { colors, motion, radius, spacing } from "@/theme";
 import { AppText } from "@/ui/AppText";
 import { StockBadge } from "@/ui/Badges";
@@ -21,6 +22,7 @@ import { ProductImage } from "@/ui/ProductImage";
 import { QuantityStepper } from "@/ui/QuantityStepper";
 import { Screen } from "@/ui/Screen";
 import { Sheet } from "@/ui/Sheet";
+import { SizePicker } from "@/ui/SizePicker";
 import { EmptyState, LoadingState } from "@/ui/States";
 
 const MAX_PER_ORDER = 10;
@@ -30,17 +32,19 @@ const MAX_PER_ORDER = 10;
  * La commande est créée sur le serveur au moment de passer au paiement.
  */
 export default function OrderScreen() {
-  const { productId } = useLocalSearchParams<{ productId: string }>();
+  const { productId, taille } = useLocalSearchParams<{ productId: string; taille?: string }>();
   const product = useProduct(productId);
   const client = useQueryClient();
   const { status } = useSession();
   const signedIn = status === "signedIn";
   const [quantity, setQuantity] = useState(1);
+  // La taille choisie sur la fiche produit, modifiable ici.
+  const [size, setSize] = useState<Size>(isSize(taille) ? taille : DEFAULT_SIZE);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<{ tone: NoticeTone; title: string; message: string } | null>(null);
   const [stockSheet, setStockSheet] = useState<{ available: number; message: string } | null>(null);
   // Même clé si on renvoie la même commande (réseau coupé) : le serveur ne la crée pas deux fois.
-  const orderKey = useRef<{ key: string; quantity: number } | null>(null);
+  const orderKey = useRef<{ key: string; quantity: number; size: Size } | null>(null);
 
   if (!product.data) {
     return (
@@ -71,10 +75,11 @@ export default function OrderScreen() {
     setCreating(true);
     setNotice(null);
     const previous = orderKey.current;
-    const key = previous && previous.quantity === safeQuantity ? previous.key : newIdempotencyKey();
-    orderKey.current = { key, quantity: safeQuantity };
+    // Même quantité et même taille = même commande : même clé. Sinon, nouvelle clé.
+    const key = previous && previous.quantity === safeQuantity && previous.size === size ? previous.key : newIdempotencyKey();
+    orderKey.current = { key, quantity: safeQuantity, size };
     try {
-      const order = await api.createOrder([{ productId: current.id, quantity: safeQuantity }], key);
+      const order = await api.createOrder([{ productId: current.id, quantity: safeQuantity, size }], key);
       await rememberOrder(client, order);
       router.push({ pathname: "/payment/[orderId]", params: { orderId: order.id } });
     } catch (error) {
@@ -105,7 +110,7 @@ export default function OrderScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={styles.title}>
           <AppText variant="h1">Votre commande</AppText>
-          <AppText variant="body">Choisissez la quantité, le total se met à jour.</AppText>
+          <AppText variant="body">Choisissez la taille et la quantité, le total se met à jour.</AppText>
         </View>
 
         <Card style={styles.productCard}>
@@ -117,12 +122,22 @@ export default function OrderScreen() {
             <AppText variant="small" numberOfLines={1}>
               {modelCopy(model).tagline}
             </AppText>
-            <AppText variant="small">Couleur : {color}</AppText>
+            <AppText variant="small">
+              Couleur : {color} · Taille : {size}
+            </AppText>
             <View style={styles.productBottom}>
               <AppText variant="price">{formatCdf(current.priceCdf)}</AppText>
               <StockBadge stock={current.stock} size="sm" />
             </View>
           </View>
+        </Card>
+
+        <Card style={styles.sizeCard}>
+          <View style={styles.sizeLabel}>
+            <AppText variant="bodyStrong">Taille</AppText>
+            <AppText variant="caption">Coupe ample : votre taille habituelle</AppText>
+          </View>
+          <SizePicker value={size} onChange={setSize} disabled={creating} />
         </Card>
 
         <Card style={styles.quantityCard}>
@@ -193,6 +208,8 @@ const styles = StyleSheet.create({
   productText: { flex: 1, gap: 3 },
   productBottom: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, marginTop: spacing.xs, flexWrap: "wrap" },
   quantityCard: { paddingVertical: spacing.md },
+  sizeCard: { gap: spacing.md },
+  sizeLabel: { gap: 2 },
   quantityRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
   quantityLabel: { flex: 1, gap: 2 },
   footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.sm, maxWidth: 640, width: "100%", alignSelf: "center", backgroundColor: colors.background },

@@ -10,13 +10,13 @@ import { StatusBadge } from "./Badges";
 import { PressableScale } from "./PressableScale";
 import { ProductImage } from "./ProductImage";
 
-/** « Le Classique · Noir · Qté 2 », ou pour un panier « 2 articles · 3 pièces » (court, lisible sur petit écran). */
+/** « Le Classique · Noir · M · Qté 2 », ou pour un panier « 2 articles · 3 pièces » (court, lisible sur petit écran). */
 function describeOrder(order: Order): string {
   const first = order.items[0];
   if (!first) return "";
   if (order.items.length === 1) {
     const { model, color } = splitProductName(first.product.name);
-    return `${[model, color].filter(Boolean).join(" · ")} · Qté ${first.quantity}`;
+    return `${[model, color, first.size].filter(Boolean).join(" · ")} · Qté ${first.quantity}`;
   }
   return `${order.items.length} articles · ${order.itemCount} pièce${order.itemCount > 1 ? "s" : ""}`;
 }

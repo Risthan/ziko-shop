@@ -30,6 +30,8 @@ export interface OrderItem {
   productId: string;
   product: { name: string; imageUrl: string | null };
   quantity: number;
+  /** Taille choisie (S à XXL), ou null pour une commande passée sans taille. */
+  size?: string | null;
   /** Prix figé au moment de la commande. */
   unitPriceCdf: number;
   lineTotalCdf: number;

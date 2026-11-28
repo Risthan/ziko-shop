@@ -7,7 +7,7 @@ import { StatusBadge } from "./Badges";
 import { Card, Divider, InfoRow } from "./Card";
 import { ProductImage } from "./ProductImage";
 
-/** Ligne article compacte : vignette, modèle, couleur, quantité, montant. */
+/** Ligne article compacte : vignette, modèle, couleur, taille, quantité, montant. */
 export function OrderLine({ item }: { item: OrderItem }) {
   const { model, color } = splitProductName(item.product.name);
   return (
@@ -18,7 +18,7 @@ export function OrderLine({ item }: { item: OrderItem }) {
           {model}
         </AppText>
         <AppText variant="small" numberOfLines={1}>
-          {[color, `Qté : ${item.quantity}`].filter(Boolean).join("  ·  ")}
+          {[color, item.size ? `Taille ${item.size}` : null, `Qté : ${item.quantity}`].filter(Boolean).join("  ·  ")}
         </AppText>
         <AppText variant="small">{formatCdf(item.unitPriceCdf)} / pièce</AppText>
       </View>
